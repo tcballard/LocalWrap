@@ -21,11 +21,6 @@
         "dist:mac": "electron-builder --mac --publish=never",
         "dist:win": "electron-builder --win --publish=never",
         "dist:linux": "electron-builder --linux --publish=never",
-        "setup-certs": "scripts/setup-certificates.sh",
-        "setup-production": "scripts/setup-production.sh",
-        "verify:mac": "scripts/verify-macos.sh",
-        "verify:win": "scripts/verify-windows.sh",
-        "verify:linux": "scripts/verify-linux.sh",
         "security-check": "npx electron-builder --dir --config.nsis.oneClick=false",
         "test": "jest",
         "test:watch": "jest --watch",
@@ -74,20 +69,11 @@
         "win": {
             "target": "nsis",
             "icon": "assets/icon.ico",
-            "requestedExecutionLevel": "asInvoker",
-            "certificateFile": null,
-            "certificatePassword": null,
-            "rfc3161TimeStampServer": "http://timestamp.digicert.com",
-            "timeStampServer": "http://timestamp.digicert.com"
+            "requestedExecutionLevel": "asInvoker"
         },
         "mac": {
             "target": "dmg",
-            "icon": "assets/icon.icns",
-            "hardenedRuntime": true,
-            "entitlements": "assets/entitlements.plist",
-            "entitlementsInherit": "assets/entitlements.plist",
-            "gatekeeperAssess": false,
-            "identity": null
+            "icon": "assets/icon.icns"
         },
         "linux": {
             "target": "AppImage",
