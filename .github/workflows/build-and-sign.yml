@@ -1,0 +1,126 @@
+name: Build and Sign
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: windows-latest
+            platform: win
+          - os: ubuntu-latest
+            platform: linux
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Setup code signing (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        # Create keychain
+        security create-keychain -p "" build.keychain
+        security default-keychain -s build.keychain
+        security unlock-keychain -p "" build.keychain
+        security set-keychain-settings -t 3600 -l ~/Library/Keychains/build.keychain
+        
+        # Import certificate
+        echo "${{ secrets.MACOS_CERTIFICATE }}" | base64 --decode > certificate.p12
+        security import certificate.p12 -k build.keychain -P "${{ secrets.MACOS_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+        
+        # Set certificate identity
+        security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+        
+        # Set environment variables
+        echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> $GITHUB_ENV
+        echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> $GITHUB_ENV
+        echo "APPLE_ID_PASS=${{ secrets.APPLE_ID_PASS }}" >> $GITHUB_ENV
+
+    - name: Setup code signing (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Set certificate environment variables
+        echo "CSC_LINK=${{ secrets.WINDOWS_CERTIFICATE }}" >> $env:GITHUB_ENV
+        echo "CSC_KEY_PASSWORD=${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}" >> $env:GITHUB_ENV
+
+    - name: Setup code signing (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Import GPG key
+        echo "${{ secrets.LINUX_GPG_KEY }}" | gpg --import
+        
+        # Set environment variables
+        echo "GPG_KEY_ID=${{ secrets.LINUX_GPG_KEY_ID }}" >> $GITHUB_ENV
+        echo "APPIMAGE_SIGN=true" >> $GITHUB_ENV
+
+    - name: Build application
+      run: npm run dist:${{ matrix.platform }}
+
+    - name: Sign AppImage (Linux)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        # Download appimagetool
+        wget -O appimagetool "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+        chmod +x appimagetool
+        
+        # Sign AppImage
+        ./appimagetool --sign --sign-key "${{ secrets.LINUX_GPG_KEY_ID }}" dist/LocalWrap-*.AppImage
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: LocalWrap-${{ matrix.platform }}
+        path: dist/
+        retention-days: 30
+
+    - name: Create release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run tests
+      run: npm test
+
+    - name: Run security checks
+      run: npm run security-check 
