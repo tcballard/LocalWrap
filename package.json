@@ -1,0 +1,64 @@
+{
+    "name": "localwrap",
+    "version": "1.0.0",
+    "description": "Secure desktop wrapper for localhost development servers",
+    "main": "main.js",
+    "scripts": {
+      "start": "electron .",
+      "dev": "electron . --dev",
+      "build": "electron-builder",
+      "dist": "electron-builder --publish=never",
+      "security-check": "npx electron-builder --dir --config.nsis.oneClick=false"
+    },
+    "keywords": ["electron", "desktop", "localhost", "wrapper", "dev-server", "development"],
+    "author": "Your Name",
+    "license": "MIT",
+    "devDependencies": {
+      "electron": "^32.0.0",
+      "electron-builder": "^25.0.0"
+    },
+    "dependencies": {
+      "express": "^4.19.2",
+      "helmet": "^7.1.0",
+      "express-rate-limit": "^7.2.0",
+      "validator": "^13.12.0"
+    },
+    "build": {
+      "appId": "com.localwrap.app",
+      "productName": "LocalWrap",
+      "directories": {
+        "output": "dist"
+      },
+      "files": [
+        "main.js",
+        "preload.js",
+        "server.js",
+        "public/**/*",
+        "!public/**/*.md",
+        "node_modules/**/*",
+        "!node_modules/**/test/**/*",
+        "!node_modules/**/*.d.ts"
+      ],
+      "win": {
+        "target": "nsis",
+        "icon": "assets/icon.ico",
+        "requestedExecutionLevel": "asInvoker"
+      },
+      "mac": {
+        "target": "dmg",
+        "icon": "assets/icon.icns",
+        "hardenedRuntime": true,
+        "entitlements": "assets/entitlements.plist"
+      },
+      "linux": {
+        "target": "AppImage",
+        "icon": "assets/icon.png"
+      },
+      "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true,
+        "createDesktopShortcut": "always",
+        "createStartMenuShortcut": true
+      }
+    }
+  }
