@@ -28,7 +28,7 @@
         "dev-server",
         "development"
     ],
-    "author": "Your Name",
+    "author": "Tom Ballard",
     "license": "MIT",
     "devDependencies": {
         "@types/jest": "^30.0.0",
@@ -72,7 +72,7 @@
         },
         "linux": {
             "target": "AppImage",
-            "icon": "assets/icon.png"
+            "icon": "assets/icon-512.png"
         },
         "nsis": {
             "oneClick": false,
