@@ -36,14 +36,6 @@ LocalWrap/
 └── package.json            # Configuration
 ```
 
-## Icons
-
-Place these files in `assets/`:
-- `icon.png` - Main app icon (256x256)
-- `icon.ico` - Windows icon
-- `icon.icns` - macOS icon  
-- `tray-icon.png` - System tray icon (16x16)
-
 ## Security
 
 - Context isolation enabled
