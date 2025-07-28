@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalWrap</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            font-size: 11px;
+            background: #f0f0f0;
+            color: #000;
+            padding: 12px;
+            min-height: 100vh;
+        }
+        
+        .window {
+            background: #f0f0f0;
+            border: 1px solid #646464;
+            max-width: 420px;
+            margin: 20px auto;
+            box-shadow: 1px 1px 0px #fff inset, -1px -1px 0px #818181 inset;
+        }
+        
+        .titlebar {
+            background: linear-gradient(to bottom, #0997ff 0%, #0053ee 100%);
+            color: white;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: normal;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .titlebar-text {
+            display: flex;
+            align-items: center;
+        }
+        
+        .content {
+            padding: 16px;
+        }
+        
+        .section {
+            margin-bottom: 16px;
+        }
+        
+        .section-title {
+            font-size: 11px;
+            margin-bottom: 8px;
+            color: #000;
+        }
+        
+        .url-input {
+            width: 100%;
+            height: 22px;
+            border: 2px inset #f0f0f0;
+            padding: 2px 4px;
+            font-size: 11px;
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+        }
+        
+        .button-group {
+            text-align: right;
+            margin-top: 16px;
+        }
+        
+        .btn {
+            background: #f0f0f0;
+            border: 1px outset #f0f0f0;
+            padding: 3px 16px;
+            margin-left: 6px;
+            font-size: 11px;
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            cursor: pointer;
+            min-width: 75px;
+            height: 23px;
+        }
+        
+        .btn:hover {
+            background: #e5f3ff;
+        }
+        
+        .btn:active {
+            border: 1px inset #f0f0f0;
+        }
+        
+        .btn-small {
+            background: #f0f0f0;
+            border: 1px outset #f0f0f0;
+            padding: 2px 8px;
+            margin-left: 3px;
+            font-size: 10px;
+            font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+            cursor: pointer;
+            min-width: 40px;
+            height: 18px;
+        }
+        
+        .btn-small:hover {
+            background: #e5f3ff;
+        }
+        
+        .btn-small:active {
+            border: 1px inset #f0f0f0;
+        }
+        
+        .server-list {
+            background: #fff;
+            border: 1px inset #f0f0f0;
+            padding: 6px;
+            margin: 8px 0;
+            font-size: 10px;
+            max-height: 100px;
+            overflow-y: auto;
+        }
+        
+        .server-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 2px 0;
+            border-bottom: 1px dotted #ccc;
+        }
+        
+        .server-item:last-child {
+            border-bottom: none;
+        }
+        
+        .server-url {
+            font-weight: bold;
+            color: #0066cc;
+            cursor: pointer;
+        }
+        
+        .server-status {
+            color: #008000;
+            font-size: 9px;
+        }
+        
+        .status-bar {
+            background: #f0f0f0;
+            border-top: 1px solid #818181;
+            padding: 4px 8px;
+            font-size: 10px;
+            color: #000;
+        }
+        
+        .server-info {
+            background: #fff;
+            border: 1px inset #f0f0f0;
+            padding: 8px;
+            margin: 8px 0;
+            font-size: 10px;
+            white-space: pre-line;
+        }
+        
+        .version-info {
+            font-size: 10px;
+            color: #666;
+            text-align: center;
+            margin-top: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="window">
+        <div class="titlebar">
+            <div class="titlebar-text">LocalWrap</div>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <div class="section-title">Server Control:</div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <label style="font-size: 10px;">Port:</label>
+                    <input type="number" id="portInput" value="3000" min="1000" max="65535" 
+                           style="width: 60px; height: 18px; border: 1px inset #f0f0f0; padding: 1px 3px; font-size: 10px;">
+                    <button class="btn-small" onclick="startServer()">Start</button>
+                    <button class="btn-small" onclick="stopServer()">Stop</button>
+                    <button class="btn-small" onclick="restartServer()">Restart</button>
+                </div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Running Servers:</div>
+                <div class="server-list" id="serverList">Loading...</div>
+            </div>
+            
+            <div class="section">
+                <div class="section-title">Quick Access:</div>
+                <div class="button-group">
+                    <button class="btn" onclick="openCurrentServer()">Open Server</button>
+                    <button class="btn" onclick="refreshAll()">Refresh</button>
+                    <button class="btn" onclick="window.close()">Close</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="status-bar">
+            Ready | LocalWrap Development Server
+        </div>
+    </div>
+    
+    <div class="version-info">
+        LocalWrap v1.0 - Desktop Development Server
+    </div>
+
+    <script>
+        let servers = [];
+        let currentServerPort = parseInt(window.location.port) || 3000;
+        
+        // Server Management Functions
+        async function startServer() {
+            const port = parseInt(document.getElementById('portInput').value);
+            if (!port || port < 1000 || port > 65535) {
+                alert('Please enter a valid port number (1000-65535)');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/servers/${port}/start`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(`Server started on port ${port}`, 'success');
+                    await refreshServers();
+                } else {
+                    showMessage(result.error || 'Failed to start server', 'error');
+                }
+            } catch (error) {
+                showMessage('Error starting server: ' + error.message, 'error');
+            }
+        }
+        
+        async function stopServer() {
+            const port = parseInt(document.getElementById('portInput').value);
+            if (!port) {
+                alert('Please enter a port number');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/servers/${port}/stop`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(`Server stopped on port ${port}`, 'success');
+                    await refreshServers();
+                } else {
+                    showMessage(result.error || 'Failed to stop server', 'error');
+                }
+            } catch (error) {
+                showMessage('Error stopping server: ' + error.message, 'error');
+            }
+        }
+        
+        async function restartServer() {
+            const port = parseInt(document.getElementById('portInput').value);
+            if (!port) {
+                alert('Please enter a port number');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/servers/${port}/restart`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(`Server restarted on port ${port}`, 'success');
+                    await refreshServers();
+                } else {
+                    showMessage(result.error || 'Failed to restart server', 'error');
+                }
+            } catch (error) {
+                showMessage('Error restarting server: ' + error.message, 'error');
+            }
+        }
+        
+        async function refreshServers() {
+            try {
+                const response = await fetch('/api/servers');
+                const data = await response.json();
+                servers = data.servers || [];
+                updateServerList();
+            } catch (error) {
+                document.getElementById('serverList').innerHTML = 
+                    '<div style="color: red;">Error loading servers: ' + error.message + '</div>';
+            }
+        }
+        
+        function updateServerList() {
+            const serverList = document.getElementById('serverList');
+            
+            if (servers.length === 0) {
+                serverList.innerHTML = '<div style="color: #666;">No servers running</div>';
+                return;
+            }
+            
+            const html = servers.map(server => `
+                <div class="server-item">
+                    <span class="server-url" onclick="openServer('${server.url}')">${server.url}</span>
+                    <span class="server-status">${server.status}</span>
+                </div>
+            `).join('');
+            
+            serverList.innerHTML = html;
+        }
+        
+        function openServer(url) {
+            window.open(url, '_blank');
+        }
+        
+        function openCurrentServer() {
+            const currentUrl = `http://localhost:${currentServerPort}`;
+            window.open(currentUrl, '_blank');
+        }
+        
+        function refreshAll() {
+            refreshServers();
+        }
+        
+        function showMessage(message, type) {
+            // Simple message display - could be enhanced with a toast notification
+            const color = type === 'error' ? 'red' : 'green';
+            console.log(`%c${message}`, `color: ${color}; font-weight: bold;`);
+            
+            // Update status bar temporarily
+            const statusBar = document.querySelector('.status-bar');
+            const originalText = statusBar.textContent;
+            statusBar.textContent = message;
+            statusBar.style.color = color;
+            
+            setTimeout(() => {
+                statusBar.textContent = originalText;
+                statusBar.style.color = '';
+            }, 3000);
+        }
+        
+        // Initialize on page load
+        refreshServers();
+        
+        // Auto-refresh every 10 seconds
+        setInterval(refreshServers, 10000);
+    </script>
+</body>
+</html>

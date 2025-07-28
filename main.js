@@ -5,17 +5,24 @@ const url = require('url');
 
 let mainWindow;
 let tray;
-let server;
-const SERVER_PORT = 3000;
+
+// Server Management System
+const servers = new Map(); // port -> server instance
 const SERVER_HOST = 'localhost';
+const DEFAULT_PORT = process.env.PORT || 
+                    process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
+                    3000;
+
+console.log(`🚀 LocalWrap initializing with default port ${DEFAULT_PORT}`);
 
 // Security: Validate that URL is actually localhost
 function validateLocalhostURL(targetURL) {
   try {
     const parsedURL = new URL(targetURL);
+    const port = parseInt(parsedURL.port);
     return (
       (parsedURL.hostname === 'localhost' || parsedURL.hostname === '127.0.0.1') &&
-      parsedURL.port === SERVER_PORT.toString() &&
+      port >= 1000 && port <= 65535 && // Valid port range
       parsedURL.protocol === 'http:'
     );
   } catch (error) {
@@ -24,9 +31,38 @@ function validateLocalhostURL(targetURL) {
   }
 }
 
-// Create secure Express server
-async function createServer() {
+// Server Management Functions
+async function checkPortAvailable(port) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const server = net.createServer();
+    
+    server.listen(port, (err) => {
+      if (err) {
+        resolve(false);
+      } else {
+        server.once('close', () => resolve(true));
+        server.close();
+      }
+    });
+    
+    server.on('error', () => resolve(false));
+  });
+}
+
+async function startServer(port) {
   try {
+    // Check if server already running on this port
+    if (servers.has(port)) {
+      throw new Error(`Server already running on port ${port}`);
+    }
+    
+    // Check if port is available
+    const available = await checkPortAvailable(port);
+    if (!available) {
+      throw new Error(`Port ${port} is already in use by another application`);
+    }
+    
     const express = require('express');
     const helmet = require('helmet');
     const rateLimit = require('express-rate-limit');
@@ -90,7 +126,10 @@ async function createServer() {
         status: 'running', 
         timestamp: new Date().toISOString(),
         message: 'LocalWrap server is running securely!',
-        version: app.getVersion()
+        version: app.getVersion(),
+        port: port,
+        host: SERVER_HOST,
+        url: `http://${SERVER_HOST}:${port}`
       });
     });
     
@@ -103,218 +142,88 @@ async function createServer() {
       });
     });
     
+    // Server Management API Endpoints
+    expressApp.get('/api/servers', (req, res) => {
+      res.json({
+        servers: getServersStatus(),
+        total: servers.size
+      });
+    });
+    
+    expressApp.post('/api/servers/:port/start', async (req, res) => {
+      try {
+        const targetPort = parseInt(req.params.port);
+        if (isNaN(targetPort) || targetPort < 1000 || targetPort > 65535) {
+          return res.status(400).json({ error: 'Invalid port number (1000-65535)' });
+        }
+        
+        await startServer(targetPort);
+        res.json({ 
+          success: true, 
+          message: `Server started on port ${targetPort}`,
+          server: getServerStatus(targetPort)
+        });
+      } catch (error) {
+        res.status(400).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    expressApp.post('/api/servers/:port/stop', async (req, res) => {
+      try {
+        const targetPort = parseInt(req.params.port);
+        if (isNaN(targetPort)) {
+          return res.status(400).json({ error: 'Invalid port number' });
+        }
+        
+        await stopServer(targetPort);
+        res.json({ 
+          success: true, 
+          message: `Server stopped on port ${targetPort}`
+        });
+      } catch (error) {
+        res.status(400).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    expressApp.post('/api/servers/:port/restart', async (req, res) => {
+      try {
+        const targetPort = parseInt(req.params.port);
+        if (isNaN(targetPort)) {
+          return res.status(400).json({ error: 'Invalid port number' });
+        }
+        
+        await restartServer(targetPort);
+        res.json({ 
+          success: true, 
+          message: `Server restarted on port ${targetPort}`,
+          server: getServerStatus(targetPort)
+        });
+      } catch (error) {
+        res.status(400).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    expressApp.get('/api/servers/:port/status', (req, res) => {
+      const targetPort = parseInt(req.params.port);
+      if (isNaN(targetPort)) {
+        return res.status(400).json({ error: 'Invalid port number' });
+      }
+      
+      res.json(getServerStatus(targetPort));
+    });
+    
     // Serve main page
     expressApp.get('/', (req, res) => {
-      res.send(`
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-          <meta charset="UTF-8">
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>LocalWrap - Secure Development Server</title>
-          <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
-          <style>
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-            body { 
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              min-height: 100vh;
-              display: flex;
-              flex-direction: column;
-            }
-            .header {
-              background: rgba(255,255,255,0.1);
-              padding: 20px;
-              text-align: center;
-              backdrop-filter: blur(10px);
-              border-bottom: 1px solid rgba(255,255,255,0.2);
-            }
-            .container { 
-              flex: 1;
-              max-width: 1000px;
-              margin: 0 auto;
-              padding: 40px 20px;
-              width: 100%;
-            }
-            .card {
-              background: rgba(255,255,255,0.1); 
-              padding: 30px; 
-              border-radius: 15px;
-              margin: 20px 0;
-              backdrop-filter: blur(10px);
-              border: 1px solid rgba(255,255,255,0.2);
-              transition: transform 0.3s ease;
-            }
-            .card:hover {
-              transform: translateY(-2px);
-            }
-            .status { 
-              background: rgba(76, 175, 80, 0.2); 
-              padding: 15px; 
-              border-radius: 8px; 
-              margin: 20px 0;
-              border-left: 4px solid #4CAF50;
-            }
-            .security-info {
-              background: rgba(33, 150, 243, 0.2);
-              padding: 15px;
-              border-radius: 8px;
-              margin: 20px 0;
-              border-left: 4px solid #2196F3;
-            }
-            .api-test { 
-              background: rgba(255,255,255,0.1); 
-              padding: 20px; 
-              border-radius: 8px; 
-              margin: 20px 0;
-            }
-            button {
-              background: linear-gradient(45deg, #4CAF50, #45a049);
-              color: white;
-              border: none;
-              padding: 12px 20px;
-              border-radius: 8px;
-              cursor: pointer;
-              font-size: 14px;
-              font-weight: 500;
-              transition: all 0.3s ease;
-              margin: 5px;
-            }
-            button:hover { 
-              background: linear-gradient(45deg, #45a049, #4CAF50);
-              transform: translateY(-1px);
-              box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            }
-            button:active {
-              transform: translateY(0);
-            }
-            #apiResult {
-              margin-top: 15px;
-              padding: 15px;
-              background: rgba(0,0,0,0.3);
-              border-radius: 8px;
-              font-family: 'Courier New', monospace;
-              white-space: pre-wrap;
-              border: 1px solid rgba(255,255,255,0.1);
-              max-height: 300px;
-              overflow-y: auto;
-            }
-            .feature-grid {
-              display: grid;
-              grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-              gap: 20px;
-              margin-top: 20px;
-            }
-            .code {
-              background: rgba(0,0,0,0.2);
-              padding: 2px 6px;
-              border-radius: 4px;
-              font-family: 'Courier New', monospace;
-              font-size: 0.9em;
-            }
-            .footer {
-              background: rgba(255,255,255,0.05);
-              padding: 20px;
-              text-align: center;
-              border-top: 1px solid rgba(255,255,255,0.1);
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>🔒 LocalWrap</h1>
-            <p>Secure Desktop Wrapper for Development Servers</p>
-          </div>
-          
-          <div class="container">
-            <div class="status">
-              <strong>✅ Server Status:</strong> Running securely on http://localhost:${SERVER_PORT}
-            </div>
-            
-            <div class="security-info">
-              <strong>🛡️ Security Features:</strong> Content Security Policy enabled, request rate limiting active, static file serving with security headers
-            </div>
-            
-            <div class="card">
-              <h2>Welcome to LocalWrap!</h2>
-              <p>Your localhost development server is now running in a secure desktop environment with system tray integration.</p>
-              
-              <div class="api-test">
-                <h3>API Testing</h3>
-                <button onclick="testStatusAPI()">Test Status API</button>
-                <button onclick="testHealthAPI()">Test Health API</button>
-                <div id="apiResult"></div>
-              </div>
-            </div>
-            
-            <div class="feature-grid">
-              <div class="card">
-                <h3>🚀 Getting Started</h3>
-                <ul style="margin-left: 20px; line-height: 1.6;">
-                  <li>Add your web files to the <span class="code">public/</span> directory</li>
-                  <li>Create secure API endpoints in <span class="code">main.js</span></li>
-                  <li>Access your app via system tray</li>
-                  <li>All requests are rate-limited and validated</li>
-                </ul>
-              </div>
-              
-              <div class="card">
-                <h3>🛡️ Security Features</h3>
-                <ul style="margin-left: 20px; line-height: 1.6;">
-                  <li>Content Security Policy (CSP) headers</li>
-                  <li>Request rate limiting</li>
-                  <li>Input validation and sanitization</li>
-                  <li>Secure static file serving</li>
-                  <li>Context isolation enabled</li>
-                </ul>
-              </div>
-              
-              <div class="card">
-                <h3>⚙️ System Tray</h3>
-                <ul style="margin-left: 20px; line-height: 1.6;">
-                  <li>Close window to minimize to tray</li>
-                  <li>Right-click tray icon for options</li>
-                  <li>Double-click to show/hide window</li>
-                  <li>Single instance enforcement</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-          
-          <div class="footer">
-            <p>LocalWrap v${app.getVersion()} | Built with Electron + Express | Secure by Design</p>
-          </div>
-
-          <script>
-            async function testStatusAPI() {
-              await testAPI('/api/status');
-            }
-            
-            async function testHealthAPI() {
-              await testAPI('/api/health');
-            }
-            
-            async function testAPI(endpoint) {
-              const resultDiv = document.getElementById('apiResult');
-              resultDiv.textContent = 'Testing API...';
-              
-              try {
-                const response = await fetch(endpoint);
-                const data = await response.json();
-                resultDiv.textContent = JSON.stringify(data, null, 2);
-              } catch (error) {
-                resultDiv.textContent = 'Error: ' + error.message;
-              }
-            }
-          </script>
-        </body>
-        </html>
-      `);
+      res.sendFile(path.join(__dirname, 'public', 'app.html'));
     });
     
     // 404 handler
@@ -329,19 +238,89 @@ async function createServer() {
     });
     
     return new Promise((resolve, reject) => {
-      server = expressApp.listen(SERVER_PORT, SERVER_HOST, (err) => {
+      const server = expressApp.listen(port, SERVER_HOST, (err) => {
         if (err) {
           reject(err);
         } else {
-          console.log(`LocalWrap server running securely on http://${SERVER_HOST}:${SERVER_PORT}`);
-          resolve();
+          // Store server instance
+          servers.set(port, {
+            instance: server,
+            app: expressApp,
+            port: port,
+            status: 'running',
+            startTime: new Date()
+          });
+          
+          console.log(`✅ LocalWrap server started on http://${SERVER_HOST}:${port}`);
+          resolve(server);
         }
       });
     });
   } catch (error) {
-    console.error('Failed to create server:', error);
+    console.error(`Failed to start server on port ${port}:`, error);
     throw error;
   }
+}
+
+async function stopServer(port) {
+  try {
+    const serverInfo = servers.get(port);
+    if (!serverInfo) {
+      throw new Error(`No server running on port ${port}`);
+    }
+    
+    return new Promise((resolve) => {
+      serverInfo.instance.close(() => {
+        servers.delete(port);
+        console.log(`🛑 LocalWrap server stopped on port ${port}`);
+        resolve();
+      });
+    });
+  } catch (error) {
+    console.error(`Failed to stop server on port ${port}:`, error);
+    throw error;
+  }
+}
+
+async function restartServer(port) {
+  try {
+    await stopServer(port);
+    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+    await startServer(port);
+    console.log(`🔄 LocalWrap server restarted on port ${port}`);
+  } catch (error) {
+    console.error(`Failed to restart server on port ${port}:`, error);
+    throw error;
+  }
+}
+
+function getServersStatus() {
+  const status = [];
+  for (const [port, serverInfo] of servers.entries()) {
+    status.push({
+      port: port,
+      status: serverInfo.status,
+      url: `http://${SERVER_HOST}:${port}`,
+      startTime: serverInfo.startTime,
+      uptime: Date.now() - serverInfo.startTime.getTime()
+    });
+  }
+  return status;
+}
+
+function getServerStatus(port) {
+  const serverInfo = servers.get(port);
+  if (!serverInfo) {
+    return { port: port, status: 'stopped' };
+  }
+  
+  return {
+    port: port,
+    status: serverInfo.status,
+    url: `http://${SERVER_HOST}:${port}`,
+    startTime: serverInfo.startTime,
+    uptime: Date.now() - serverInfo.startTime.getTime()
+  };
 }
 
 function createWindow() {
@@ -403,7 +382,7 @@ function createWindow() {
   });
 
   // Load the localhost URL after validation
-  const targetURL = `http://${SERVER_HOST}:${SERVER_PORT}`;
+  const targetURL = `http://${SERVER_HOST}:${DEFAULT_PORT}`;
   if (validateLocalhostURL(targetURL)) {
     mainWindow.loadURL(targetURL);
   } else {
@@ -470,9 +449,9 @@ function createTray() {
       }
     },
     {
-      label: 'Open in Browser',
+      label: 'Open Main Server',
       click: () => {
-        shell.openExternal(`http://${SERVER_HOST}:${SERVER_PORT}`);
+        shell.openExternal(`http://${SERVER_HOST}:${DEFAULT_PORT}`);
       }
     },
     { type: 'separator' },
@@ -481,7 +460,7 @@ function createTray() {
       enabled: false
     },
     {
-      label: `✅ Running on ${SERVER_HOST}:${SERVER_PORT}`,
+      label: `✅ Running ${servers.size} server(s)`,
       enabled: false
     },
     { type: 'separator' },
@@ -527,8 +506,8 @@ function createTray() {
 // App event handlers
 app.whenReady().then(async () => {
   try {
-    // Start the server
-    await createServer();
+    // Start the default server
+    await startServer(DEFAULT_PORT);
     
     // Then create the window and tray
     createWindow();
@@ -556,10 +535,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuiting = true;
   
-  // Clean up server
-  if (server) {
-    server.close();
+  // Clean up all servers
+  for (const [port, serverInfo] of servers.entries()) {
+    serverInfo.instance.close();
   }
+  servers.clear();
 });
 
 // Security: Prevent multiple instances
@@ -581,7 +561,7 @@ if (!gotTheLock) {
 // Security: Handle certificate errors
 app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
   // For localhost development, we might need to handle self-signed certificates
-  if (url.startsWith(`http://${SERVER_HOST}:${SERVER_PORT}`)) {
+  if (url.startsWith(`http://${SERVER_HOST}:`)) {
     event.preventDefault();
     callback(true);
   } else {
