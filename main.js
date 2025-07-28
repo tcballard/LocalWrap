@@ -347,27 +347,39 @@ async function createServer() {
 function createWindow() {
   // Security: Create secure browser window
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 800,
-    minHeight: 600,
+    // === WINDOW APPEARANCE ===
+    width: 1200,              
+    height: 800,              
+    minWidth: 800,            
+    minHeight: 600,           
+    
+    // === WINDOW BEHAVIOR ===
+    resizable: true,          
+    center: true,             
+    
+    // === VISUAL APPEARANCE ===
+    backgroundColor: '#667eea', 
+    autoHideMenuBar: true,    
+    
+    // === WINDOW STARTUP ===
+    show: false,              
+    
+    // === SIMPLIFIED SECURITY SETTINGS ===
     webPreferences: {
-      nodeIntegration: false, // Security: Disable node integration
-      contextIsolation: true, // Security: Enable context isolation
-      preload: path.join(__dirname, 'preload.js'),
-      webSecurity: true, // Security: Enable web security
+      nodeIntegration: false,        
+      contextIsolation: true,        
+      preload: path.join(__dirname, 'preload.js'), // Minimal preload with no IPC
+      webSecurity: true,             
       allowRunningInsecureContent: false,
-      experimentalFeatures: false,
-      enableBlinkFeatures: '',
-      disableBlinkFeatures: '',
-      sandbox: true // Security: Enable sandbox
+      sandbox: true,                 
+      // REMOVED: devTools settings
     },
+    
+    // === ICON ===
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    show: false,
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    webContents: {
-      zoomFactor: 1.0
-    }
+    
+    // === NO DEV OPTIONS ===
+    // Removed all DevTools functionality
   });
 
   // Security: Set window title
@@ -402,16 +414,7 @@ function createWindow() {
   // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    
-    // Security: Disable eval and related functions
-    mainWindow.webContents.executeJavaScript(`
-      delete window.eval;
-      delete window.Function;
-      delete window.setTimeout;
-      delete window.setInterval;
-      window.setTimeout = (fn, delay) => originalSetTimeout(fn, delay);
-      window.setInterval = (fn, delay) => originalSetInterval(fn, delay);
-    `).catch(console.error);
+    // Removed JavaScript injection to eliminate errors
   });
 
   // Handle window closed (minimize to tray)
@@ -434,9 +437,7 @@ function createWindow() {
   });
 
   // Development: Open DevTools only in dev mode
-  if (process.argv.includes('--dev')) {
-    mainWindow.webContents.openDevTools();
-  }
+  // Removed all DevTools functionality
 }
 
 function createTray() {
@@ -521,10 +522,12 @@ function createTray() {
   });
 }
 
+// === NO IPC HANDLERS - REMOVED TO ELIMINATE ERRORS ===
+
 // App event handlers
 app.whenReady().then(async () => {
   try {
-    // Start the server first
+    // Start the server
     await createServer();
     
     // Then create the window and tray
