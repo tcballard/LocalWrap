@@ -55,6 +55,7 @@
             "server.js",
             "public/**/*",
             "!public/**/*.md",
+            "assets/**/*",
             "node_modules/**/*",
             "!node_modules/**/test/**/*",
             "!node_modules/**/*.d.ts"
@@ -72,7 +73,7 @@
         },
         "linux": {
             "target": "AppImage",
-            "icon": "assets/icon-512.png"
+            "icon": "assets/icon.png"
         },
         "nsis": {
             "oneClick": false,

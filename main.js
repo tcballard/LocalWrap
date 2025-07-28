@@ -427,6 +427,10 @@ function createTray() {
   try {
     if (fs.existsSync(iconPath)) {
       trayIcon = nativeImage.createFromPath(iconPath);
+      // Ensure proper size for macOS tray
+      if (process.platform === 'darwin') {
+        trayIcon = trayIcon.resize({ width: 16, height: 16 });
+      }
     } else {
       // Fallback: create a simple colored icon
       trayIcon = nativeImage.createEmpty();
