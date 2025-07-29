@@ -994,7 +994,7 @@ function createWindow() {
     },
     
     // === ICON ===
-    icon: path.join(__dirname, 'assets', 'icon.png'),
+    icon: path.join(__dirname, 'assets', 'localwrap-icon.png'),
     
     // === NO DEV OPTIONS ===
     // Removed all DevTools functionality
@@ -1060,7 +1060,7 @@ function createWindow() {
 
 function createTray() {
   // Create tray icon
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  const iconPath = path.join(__dirname, 'assets', 'localwrap-icon.png');
   let trayIcon;
   
   try {

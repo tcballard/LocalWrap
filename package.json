@@ -26,11 +26,8 @@
         "test:watch": "jest --watch",
         "test:coverage": "jest --coverage",
         "pack": "electron-builder --dir",
-        "release": "electron-builder --publish=never",
-        "release:win": "electron-builder --win --publish=never",
-        "release:mac": "electron-builder --mac --publish=never",
-        "release:linux": "electron-builder --linux --publish=never",
-        "release:all": "electron-builder --win --mac --linux --publish=never"
+        "release": "electron-builder --win --publish=never",
+        "release:win": "electron-builder --win --publish=never"
     },
     "keywords": [
         "electron",
@@ -47,7 +44,8 @@
         "electron": "^32.0.0",
         "electron-builder": "^25.0.0",
         "electron-test": "^1.0.0",
-        "jest": "^30.0.5"
+        "jest": "^30.0.5",
+        "to-ico": "^1.1.5"
     },
     "dependencies": {
         "express": "^4.19.2",
@@ -79,27 +77,22 @@
             "target": [
                 {
                     "target": "nsis",
-                    "arch": ["x64", "ia32"]
+                    "arch": [
+                        "x64",
+                        "ia32"
+                    ]
                 },
                 {
                     "target": "portable",
-                    "arch": ["x64"]
+                    "arch": [
+                        "x64"
+                    ]
                 }
             ],
-            "icon": "assets/icon.ico",
+            "icon": "assets/localwrap-icon.png",
             "requestedExecutionLevel": "asInvoker",
             "publisherName": "Tom Ballard",
             "verifyUpdateCodeSignature": false
-        },
-        "mac": {
-            "target": "dmg",
-            "icon": "assets/icon.icns",
-            "category": "public.app-category.developer-tools"
-        },
-        "linux": {
-            "target": "AppImage",
-            "icon": "assets/icon.png",
-            "category": "Development"
         },
         "nsis": {
             "oneClick": false,
@@ -110,9 +103,9 @@
             "menuCategory": "Development Tools",
             "shortcutName": "LocalWrap",
             "uninstallDisplayName": "LocalWrap - Desktop Development Server",
-            "installerIcon": "assets/icon.ico",
-            "uninstallerIcon": "assets/icon.ico",
-            "installerHeader": "assets/icon.ico",
+            "installerIcon": "assets/localwrap-icon.ico",
+            "uninstallerIcon": "assets/localwrap-icon.ico",
+            "installerHeader": "assets/localwrap-icon-256.png",
             "include": "build/installer.nsh"
         },
         "portable": {
