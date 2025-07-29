@@ -23,7 +23,7 @@
         .window {
             background: #f0f0f0;
             border: 1px solid #646464;
-            max-width: 420px;
+            max-width: 450px;
             margin: 20px auto;
             box-shadow: 1px 1px 0px #fff inset, -1px -1px 0px #818181 inset;
         }
@@ -112,38 +112,6 @@
             border: 1px inset #f0f0f0;
         }
         
-        .server-list {
-            background: #fff;
-            border: 1px inset #f0f0f0;
-            padding: 6px;
-            margin: 8px 0;
-            font-size: 10px;
-            max-height: 100px;
-            overflow-y: auto;
-        }
-        
-        .server-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 2px 0;
-            border-bottom: 1px dotted #ccc;
-        }
-        
-        .server-item:last-child {
-            border-bottom: none;
-        }
-        
-        .server-url {
-            font-weight: bold;
-            color: #0066cc;
-            cursor: pointer;
-        }
-        
-        .server-status {
-            color: #008000;
-            font-size: 9px;
-        }
         
         .status-bar {
             background: #f0f0f0;
@@ -153,20 +121,29 @@
             color: #000;
         }
         
-        .server-info {
-            background: #fff;
-            border: 1px inset #f0f0f0;
-            padding: 8px;
-            margin: 8px 0;
-            font-size: 10px;
-            white-space: pre-line;
-        }
         
         .version-info {
             font-size: 10px;
             color: #666;
             text-align: center;
             margin-top: 12px;
+        }
+        
+        .terminal-output {
+            background: #000;
+            color: #00ff00;
+            border: 1px inset #f0f0f0;
+            padding: 6px;
+            margin: 8px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 9px;
+            max-height: 120px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .terminal-hidden {
+            display: none;
         }
     </style>
 </head>
@@ -178,34 +155,62 @@
         
         <div class="content">
             <div class="section">
-                <div class="section-title">Server Control:</div>
+                <div class="section-title">Script & Server Control:</div>
+                
+                <!-- Working Directory -->
+                <div style="margin-bottom: 8px;">
+                    <label style="font-size: 10px; display: block; margin-bottom: 2px;">Working Directory:</label>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <input type="text" id="workingDirInput" placeholder="Current directory" readonly
+                               style="flex: 1; height: 18px; border: 1px inset #f0f0f0; padding: 1px 4px; font-size: 10px; background: #f9f9f9;">
+                        <button class="btn-small" onclick="selectWorkingDirectory()">Browse</button>
+                        <button class="btn-small" onclick="resetWorkingDirectory()">Reset</button>
+                    </div>
+                </div>
+                
+                <!-- Script Input -->
+                <div style="margin-bottom: 8px;">
+                    <label style="font-size: 10px; display: block; margin-bottom: 2px;">Script Command:</label>
+                    <div style="display: flex; align-items: center; gap: 4px;">
+                        <input type="text" id="scriptInput" placeholder="npm start" 
+                               style="flex: 1; height: 18px; border: 1px inset #f0f0f0; padding: 1px 4px; font-size: 10px;">
+                        <select id="scriptPresets" onchange="setScriptPreset()" 
+                                style="height: 20px; border: 1px inset #f0f0f0; font-size: 10px;">
+                            <option value="">Presets...</option>
+                            <option value="npm start">npm start</option>
+                            <option value="npm run dev">npm run dev</option>
+                            <option value="yarn start">yarn start</option>
+                            <option value="yarn dev">yarn dev</option>
+                            <option value="python -m http.server 3001">Python Server</option>
+                            <option value="php -S localhost:3001">PHP Server</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Port and Controls -->
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
                     <label style="font-size: 10px;">Port:</label>
-                    <input type="number" id="portInput" value="3000" min="1000" max="65535" 
+                    <input type="number" id="portInput" value="3001" min="1000" max="65535" 
                            style="width: 60px; height: 18px; border: 1px inset #f0f0f0; padding: 1px 3px; font-size: 10px;">
-                    <button class="btn-small" onclick="startServer()">Start</button>
-                    <button class="btn-small" onclick="stopServer()">Stop</button>
-                    <button class="btn-small" onclick="restartServer()">Restart</button>
+                    <button class="btn-small" onclick="executeScript()">Run Script</button>
+                    <button class="btn-small" onclick="stopScript()">Stop</button>
+                    <button class="btn-small" onclick="createDesktopApp()">Desktop App</button>
                 </div>
             </div>
             
             <div class="section">
-                <div class="section-title">Running Servers:</div>
-                <div class="server-list" id="serverList">Loading...</div>
-            </div>
-            
-            <div class="section">
-                <div class="section-title">Quick Access:</div>
-                <div class="button-group">
-                    <button class="btn" onclick="openCurrentServer()">Open Server</button>
-                    <button class="btn" onclick="refreshAll()">Refresh</button>
-                    <button class="btn" onclick="window.close()">Close</button>
+                <div class="section-title" onclick="toggleTerminal()" style="cursor: pointer;">
+                    Terminal Output <span id="terminalToggle">[-]</span>
+                </div>
+                <div class="terminal-output" id="terminalOutput">
+                    <div style="color: #666; font-size: 9px; padding: 4px;">Ready to execute scripts...</div>
                 </div>
             </div>
+            
         </div>
         
-        <div class="status-bar">
-            Ready | LocalWrap Development Server
+        <div class="status-bar" id="statusBar">
+            Ready | No script running
         </div>
     </div>
     
@@ -214,141 +219,362 @@
     </div>
 
     <script>
-        let servers = [];
-        let currentServerPort = parseInt(window.location.port) || 3000;
+        console.log('🚀 LocalWrap JavaScript loading...');
         
-        // Server Management Functions
-        async function startServer() {
+        function updateStatusBar(message) {
+            const statusBar = document.getElementById('statusBar');
+            statusBar.textContent = message;
+        }
+        
+        function showMessage(message, type) {
+            const color = type === 'error' ? 'red' : 'green';
+            console.log(`%c${message}`, `color: ${color}; font-weight: bold;`);
+            
+            // Update status bar
+            updateStatusBar(message);
+            const statusBar = document.getElementById('statusBar');
+            statusBar.style.color = color;
+            
+            setTimeout(() => {
+                const scriptStatus = currentProcess ? 'Script running' : 'No script running';
+                updateStatusBar(`Ready | ${scriptStatus}`);
+                statusBar.style.color = '';
+            }, 3000);
+        }
+        
+        // Script Management Functions
+        let currentProcess = null;
+        let currentWorkingDir = null;
+        
+        function setScriptPreset() {
+            const preset = document.getElementById('scriptPresets').value;
+            if (preset) {
+                document.getElementById('scriptInput').value = preset;
+                // Auto-update port based on preset
+                if (preset.includes('3001')) {
+                    document.getElementById('portInput').value = '3001';
+                } else if (preset.includes('8000')) {
+                    document.getElementById('portInput').value = '8000';
+                }
+            }
+        }
+        
+        async function executeScript() {
+            console.log('executeScript called');
+            const script = document.getElementById('scriptInput').value.trim();
             const port = parseInt(document.getElementById('portInput').value);
+            
+            console.log('Script:', script, 'Port:', port);
+            
+            if (!script) {
+                alert('Please enter a script command');
+                return;
+            }
+            
             if (!port || port < 1000 || port > 65535) {
                 alert('Please enter a valid port number (1000-65535)');
                 return;
             }
             
             try {
-                const response = await fetch(`/api/servers/${port}/start`, { method: 'POST' });
+                addTerminalOutput(`> Executing: ${script}`);
+                addTerminalOutput(`> Target port: ${port}`);
+                
+                console.log('Making fetch request...');
+                const response = await fetch('/api/script/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        script, 
+                        port,
+                        workingDir: currentWorkingDir 
+                    })
+                });
+                
+                console.log('Response received:', response.status);
                 const result = await response.json();
+                console.log('Result:', result);
                 
                 if (result.success) {
-                    showMessage(`Server started on port ${port}`, 'success');
-                    await refreshServers();
+                    addTerminalOutput(`> Script started with PID: ${result.pid}`);
+                    
+                    // Show port change information if applicable
+                    if (result.portMessage) {
+                        addTerminalOutput(`> ${result.portMessage}`);
+                        showMessage(`Script started on port ${result.port}`, 'success');
+                        
+                        // Update the port input to reflect the actual port used
+                        document.getElementById('portInput').value = result.port;
+                    } else {
+                        showMessage('Script started successfully', 'success');
+                    }
+                    
+                    if (result.actualCommand && result.actualCommand !== result.command) {
+                        addTerminalOutput(`> Actual command: ${result.actualCommand}`);
+                    }
+                    
+                    currentProcess = result.pid;
+                    
+                    // Update status bar
+                    updateStatusBar(`Running: ${script} on port ${result.port}`);
+                    
+                    // Start polling for output
+                    pollScriptOutput();
                 } else {
-                    showMessage(result.error || 'Failed to start server', 'error');
+                    addTerminalOutput(`> Error: ${result.error}`);
+                    showMessage(result.error || 'Failed to start script', 'error');
                 }
             } catch (error) {
-                showMessage('Error starting server: ' + error.message, 'error');
+                console.error('Execute script error:', error);
+                addTerminalOutput(`> Error: ${error.message}`);
+                showMessage('Error executing script: ' + error.message, 'error');
             }
         }
         
-        async function stopServer() {
+        async function stopScript() {
+            if (!currentProcess) {
+                showMessage('No script is currently running', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/script/stop/${currentProcess}`, { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    addTerminalOutput(`> Script stopped (PID: ${currentProcess})`);
+                    currentProcess = null;
+                    updateStatusBar('Ready | No script running');
+                    showMessage('Script stopped', 'success');
+                } else {
+                    addTerminalOutput(`> Error stopping script: ${result.error}`);
+                    showMessage(result.error || 'Failed to stop script', 'error');
+                }
+            } catch (error) {
+                addTerminalOutput(`> Error: ${error.message}`);
+                showMessage('Error stopping script: ' + error.message, 'error');
+            }
+        }
+        
+        async function createDesktopApp() {
+            console.log('createDesktopApp called');
             const port = parseInt(document.getElementById('portInput').value);
-            if (!port) {
-                alert('Please enter a port number');
+            console.log('Port:', port);
+            
+            // Create a simple input dialog instead of using prompt()
+            const appName = await showInputDialog('Enter desktop app name:', 'MyApp');
+            console.log('App name:', appName);
+            
+            if (!appName) {
+                console.log('No app name provided, returning');
                 return;
             }
             
             try {
-                const response = await fetch(`/api/servers/${port}/stop`, { method: 'POST' });
+                console.log('Making desktop app creation request...');
+                addTerminalOutput(`> Creating desktop app "${appName}"...`);
+                addTerminalOutput(`> Installing dependencies and launching...`);
+                showMessage('Creating desktop app...', 'success');
+                
+                const response = await fetch('/api/desktop-app/create', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ port, appName })
+                });
+                
+                console.log('Response status:', response.status);
                 const result = await response.json();
+                console.log('Result:', result);
                 
                 if (result.success) {
-                    showMessage(`Server stopped on port ${port}`, 'success');
-                    await refreshServers();
+                    if (result.launched) {
+                        showMessage(`Desktop app "${appName}" created and launched!`, 'success');
+                        addTerminalOutput(`> Desktop app created: ${result.path}`);
+                        addTerminalOutput(`> Running script: ${result.script}`);
+                        addTerminalOutput(`> Desktop app launched successfully!`);
+                    } else {
+                        showMessage(`Desktop app "${appName}" created successfully!`, 'success');
+                        addTerminalOutput(`> Desktop app created: ${result.path}`);
+                    }
                 } else {
-                    showMessage(result.error || 'Failed to stop server', 'error');
+                    showMessage(result.error || 'Failed to create desktop app', 'error');
+                    addTerminalOutput(`> Error: ${result.error}`);
                 }
             } catch (error) {
-                showMessage('Error stopping server: ' + error.message, 'error');
+                console.error('Desktop app creation error:', error);
+                showMessage('Error creating desktop app: ' + error.message, 'error');
+                addTerminalOutput(`> Error: ${error.message}`);
             }
         }
         
-        async function restartServer() {
-            const port = parseInt(document.getElementById('portInput').value);
-            if (!port) {
-                alert('Please enter a port number');
-                return;
+        function showInputDialog(message, defaultValue) {
+            return new Promise((resolve) => {
+                // Create overlay
+                const overlay = document.createElement('div');
+                overlay.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100%;
+                    height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    z-index: 1000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                `;
+                
+                // Create dialog
+                const dialog = document.createElement('div');
+                dialog.style.cssText = `
+                    background: #f0f0f0;
+                    border: 2px outset #f0f0f0;
+                    padding: 16px;
+                    font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
+                    font-size: 11px;
+                    min-width: 300px;
+                `;
+                
+                dialog.innerHTML = `
+                    <div style="margin-bottom: 12px;">${message}</div>
+                    <input type="text" id="dialogInput" value="${defaultValue}" 
+                           style="width: 100%; height: 20px; border: 1px inset #f0f0f0; padding: 2px; font-size: 11px; margin-bottom: 12px;">
+                    <div style="text-align: right;">
+                        <button id="dialogOk" style="background: #f0f0f0; border: 1px outset #f0f0f0; padding: 3px 16px; margin-left: 6px; font-size: 11px; cursor: pointer; min-width: 75px;">OK</button>
+                        <button id="dialogCancel" style="background: #f0f0f0; border: 1px outset #f0f0f0; padding: 3px 16px; margin-left: 6px; font-size: 11px; cursor: pointer; min-width: 75px;">Cancel</button>
+                    </div>
+                `;
+                
+                overlay.appendChild(dialog);
+                document.body.appendChild(overlay);
+                
+                const input = document.getElementById('dialogInput');
+                const okBtn = document.getElementById('dialogOk');
+                const cancelBtn = document.getElementById('dialogCancel');
+                
+                input.focus();
+                input.select();
+                
+                function cleanup() {
+                    document.body.removeChild(overlay);
+                }
+                
+                okBtn.onclick = () => {
+                    const value = input.value.trim();
+                    cleanup();
+                    resolve(value);
+                };
+                
+                cancelBtn.onclick = () => {
+                    cleanup();
+                    resolve(null);
+                };
+                
+                input.onkeypress = (e) => {
+                    if (e.key === 'Enter') {
+                        okBtn.click();
+                    } else if (e.key === 'Escape') {
+                        cancelBtn.click();
+                    }
+                };
+            });
+        }
+        
+        function addTerminalOutput(text) {
+            const terminal = document.getElementById('terminalOutput');
+            const timestamp = new Date().toLocaleTimeString();
+            terminal.innerHTML += `\n[${timestamp}] ${text}`;
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+        
+        function toggleTerminal() {
+            const terminal = document.getElementById('terminalOutput');
+            const toggle = document.getElementById('terminalToggle');
+            
+            if (terminal.classList.contains('terminal-hidden')) {
+                terminal.classList.remove('terminal-hidden');
+                toggle.textContent = '[-]';
+            } else {
+                terminal.classList.add('terminal-hidden');
+                toggle.textContent = '[+]';
             }
+        }
+        
+        async function pollScriptOutput() {
+            if (!currentProcess) return;
             
             try {
-                const response = await fetch(`/api/servers/${port}/restart`, { method: 'POST' });
+                const response = await fetch(`/api/script/output/${currentProcess}`);
                 const result = await response.json();
                 
-                if (result.success) {
-                    showMessage(`Server restarted on port ${port}`, 'success');
-                    await refreshServers();
+                // Only add new output lines (backend now returns only new lines)
+                if (result.success && result.output && result.output.length > 0) {
+                    result.output.forEach(line => {
+                        if (line.trim()) { // Only add non-empty lines
+                            addTerminalOutput(line);
+                        }
+                    });
+                }
+                
+                // Continue polling if process is still running
+                if (result.running) {
+                    setTimeout(pollScriptOutput, 2000); // Reduced frequency to 2 seconds
                 } else {
-                    showMessage(result.error || 'Failed to restart server', 'error');
+                    currentProcess = null;
+                    updateStatusBar('Ready | No script running');
+                    addTerminalOutput('> Script finished');
                 }
             } catch (error) {
-                showMessage('Error restarting server: ' + error.message, 'error');
+                console.error('Error polling script output:', error);
             }
         }
         
-        async function refreshServers() {
+        // Working Directory Management
+        async function selectWorkingDirectory() {
             try {
-                const response = await fetch('/api/servers');
-                const data = await response.json();
-                servers = data.servers || [];
-                updateServerList();
+                const response = await fetch('/api/select-directory', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                
+                const result = await response.json();
+                
+                if (result.success && result.path) {
+                    currentWorkingDir = result.path;
+                    document.getElementById('workingDirInput').value = result.path;
+                    addTerminalOutput(`> Working directory set to: ${result.path}`);
+                    showMessage('Working directory updated', 'success');
+                } else if (result.cancelled) {
+                    // User cancelled, do nothing
+                } else {
+                    showMessage('Failed to select directory', 'error');
+                }
             } catch (error) {
-                document.getElementById('serverList').innerHTML = 
-                    '<div style="color: red;">Error loading servers: ' + error.message + '</div>';
+                console.error('Directory selection error:', error);
+                showMessage('Error selecting directory: ' + error.message, 'error');
             }
         }
         
-        function updateServerList() {
-            const serverList = document.getElementById('serverList');
-            
-            if (servers.length === 0) {
-                serverList.innerHTML = '<div style="color: #666;">No servers running</div>';
-                return;
+        function resetWorkingDirectory() {
+            currentWorkingDir = null;
+            document.getElementById('workingDirInput').value = '';
+            document.getElementById('workingDirInput').placeholder = 'Current directory';
+            addTerminalOutput('> Working directory reset to current directory');
+            showMessage('Working directory reset', 'success');
+        }
+        
+        // Initialize working directory display
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch('/api/current-directory');
+                const result = await response.json();
+                if (result.success) {
+                    document.getElementById('workingDirInput').placeholder = result.path;
+                }
+            } catch (error) {
+                console.error('Failed to get current directory:', error);
             }
-            
-            const html = servers.map(server => `
-                <div class="server-item">
-                    <span class="server-url" onclick="openServer('${server.url}')">${server.url}</span>
-                    <span class="server-status">${server.status}</span>
-                </div>
-            `).join('');
-            
-            serverList.innerHTML = html;
-        }
-        
-        function openServer(url) {
-            window.open(url, '_blank');
-        }
-        
-        function openCurrentServer() {
-            const currentUrl = `http://localhost:${currentServerPort}`;
-            window.open(currentUrl, '_blank');
-        }
-        
-        function refreshAll() {
-            refreshServers();
-        }
-        
-        function showMessage(message, type) {
-            // Simple message display - could be enhanced with a toast notification
-            const color = type === 'error' ? 'red' : 'green';
-            console.log(`%c${message}`, `color: ${color}; font-weight: bold;`);
-            
-            // Update status bar temporarily
-            const statusBar = document.querySelector('.status-bar');
-            const originalText = statusBar.textContent;
-            statusBar.textContent = message;
-            statusBar.style.color = color;
-            
-            setTimeout(() => {
-                statusBar.textContent = originalText;
-                statusBar.style.color = '';
-            }, 3000);
-        }
-        
-        // Initialize on page load
-        refreshServers();
-        
-        // Auto-refresh every 10 seconds
-        setInterval(refreshServers, 10000);
+        });
     </script>
 </body>
 </html>

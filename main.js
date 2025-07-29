@@ -8,6 +8,7 @@ let tray;
 
 // Server Management System
 const servers = new Map(); // port -> server instance
+const runningScripts = new Map(); // pid -> script info
 const SERVER_HOST = 'localhost';
 const DEFAULT_PORT = process.env.PORT || 
                     process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
@@ -76,7 +77,8 @@ async function startServer(port) {
         directives: {
           defaultSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrcAttr: ["'unsafe-inline'"],
           imgSrc: ["'self'", "data:", "blob:"],
           connectSrc: ["'self'"],
           fontSrc: ["'self'"],
@@ -221,6 +223,113 @@ async function startServer(port) {
       res.json(getServerStatus(targetPort));
     });
     
+    // Script Execution API Endpoints
+    expressApp.post('/api/script/execute', async (req, res) => {
+      try {
+        const { script, port, workingDir } = req.body;
+        
+        if (!script || typeof script !== 'string') {
+          return res.status(400).json({ error: 'Script command is required' });
+        }
+        
+        if (!port || isNaN(port) || port < 1000 || port > 65535) {
+          return res.status(400).json({ error: 'Valid port number (1000-65535) is required' });
+        }
+        
+        const result = await executeScript(script, port, workingDir);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    expressApp.post('/api/script/stop/:pid', async (req, res) => {
+      try {
+        const pid = parseInt(req.params.pid);
+        if (isNaN(pid)) {
+          return res.status(400).json({ error: 'Invalid process ID' });
+        }
+        
+        const result = await stopScript(pid);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    expressApp.get('/api/script/output/:pid', (req, res) => {
+      try {
+        const pid = parseInt(req.params.pid);
+        if (isNaN(pid)) {
+          return res.status(400).json({ error: 'Invalid process ID' });
+        }
+        
+        const result = getScriptOutput(pid);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    // Desktop App Creation API
+    expressApp.post('/api/desktop-app/create', async (req, res) => {
+      try {
+        const { port, appName } = req.body;
+        
+        if (!appName || typeof appName !== 'string') {
+          return res.status(400).json({ error: 'App name is required' });
+        }
+        
+        if (!port || isNaN(port) || port < 1000 || port > 65535) {
+          return res.status(400).json({ error: 'Valid port number (1000-65535) is required' });
+        }
+        
+        const result = await createDesktopApp(appName, port);
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({ 
+          error: error.message,
+          success: false 
+        });
+      }
+    });
+    
+    // Directory Management API Endpoints
+    expressApp.get('/api/current-directory', (req, res) => {
+      try {
+        res.json({
+          success: true,
+          path: process.cwd()
+        });
+      } catch (error) {
+        res.status(500).json({
+          error: error.message,
+          success: false
+        });
+      }
+    });
+    
+    expressApp.post('/api/select-directory', async (req, res) => {
+      try {
+        const result = await selectDirectory();
+        res.json(result);
+      } catch (error) {
+        res.status(500).json({
+          error: error.message,
+          success: false
+        });
+      }
+    });
+    
     // Serve main page
     expressApp.get('/', (req, res) => {
       res.sendFile(path.join(__dirname, 'public', 'app.html'));
@@ -321,6 +430,536 @@ function getServerStatus(port) {
     startTime: serverInfo.startTime,
     uptime: Date.now() - serverInfo.startTime.getTime()
   };
+}
+
+// Script Execution Functions
+async function findAvailablePort(preferredPort) {
+  const portsToTry = [preferredPort, 3001, 3002, 8000, 8080, 8081, 5000, 5001];
+  
+  for (const port of portsToTry) {
+    if (port === DEFAULT_PORT) continue; // Skip LocalWrap's port
+    const available = await checkPortAvailable(port);
+    if (available) {
+      return port;
+    }
+  }
+  
+  // If none of the common ports work, try random ports
+  for (let i = 0; i < 10; i++) {
+    const randomPort = Math.floor(Math.random() * (9999 - 3000) + 3000);
+    if (randomPort === DEFAULT_PORT) continue;
+    const available = await checkPortAvailable(randomPort);
+    if (available) {
+      return randomPort;
+    }
+  }
+  
+  throw new Error('Could not find any available port');
+}
+
+async function executeScript(script, port, workingDir = null) {
+  try {
+    let actualPort = port;
+    let portMessage = '';
+    
+    // Check if the target port conflicts with LocalWrap's own port
+    if (port === DEFAULT_PORT) {
+      actualPort = await findAvailablePort(port + 1);
+      portMessage = `Port ${port} is used by LocalWrap. Using port ${actualPort} instead.`;
+    } else {
+      // Check if port is available
+      const available = await checkPortAvailable(port);
+      if (!available) {
+        actualPort = await findAvailablePort(port + 1);
+        portMessage = `Port ${port} is already in use. Using port ${actualPort} instead.`;
+      }
+    }
+    
+    // Validate working directory if provided
+    let actualWorkingDir = workingDir || process.cwd();
+    if (workingDir) {
+      if (!fs.existsSync(workingDir)) {
+        throw new Error(`Working directory does not exist: ${workingDir}`);
+      }
+      
+      const stats = fs.statSync(workingDir);
+      if (!stats.isDirectory()) {
+        throw new Error(`Path is not a directory: ${workingDir}`);
+      }
+    }
+    
+    const { spawn } = require('child_process');
+    
+    // Parse script command and update port if needed
+    let [command, ...args] = script.split(' ');
+    
+    // If script contains a port reference, update it to the actual port
+    if (actualPort !== port) {
+      args = args.map(arg => arg.replace(port.toString(), actualPort.toString()));
+    }
+    
+    // Create process
+    const child = spawn(command, args, {
+      cwd: actualWorkingDir,
+      env: { ...process.env, PORT: actualPort.toString() },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    // Store script info
+    const scriptInfo = {
+      pid: child.pid,
+      command: script,
+      actualCommand: actualPort !== port ? `${command} ${args.join(' ')}` : script,
+      port: actualPort,
+      requestedPort: port,
+      workingDir: actualWorkingDir,
+      startTime: new Date(),
+      process: child,
+      output: [],
+      running: true,
+      portMessage: portMessage
+    };
+    
+    // Add port change message to output if needed
+    if (portMessage) {
+      scriptInfo.output.push(portMessage);
+    }
+    
+    // Add working directory info to output
+    if (workingDir && workingDir !== process.cwd()) {
+      scriptInfo.output.push(`Working directory: ${actualWorkingDir}`);
+    }
+    
+    runningScripts.set(child.pid, scriptInfo);
+    
+    // Handle output
+    child.stdout.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      lines.forEach(line => {
+        scriptInfo.output.push(line);
+        // Keep only last 100 lines
+        if (scriptInfo.output.length > 100) {
+          scriptInfo.output.shift();
+        }
+      });
+    });
+    
+    child.stderr.on('data', (data) => {
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      lines.forEach(line => {
+        scriptInfo.output.push(`ERROR: ${line}`);
+        if (scriptInfo.output.length > 100) {
+          scriptInfo.output.shift();
+        }
+      });
+    });
+    
+    child.on('close', (code) => {
+      scriptInfo.running = false;
+      scriptInfo.output.push(`Process exited with code ${code}`);
+      console.log(`Script ${child.pid} exited with code ${code}`);
+    });
+    
+    child.on('error', (error) => {
+      scriptInfo.running = false;
+      scriptInfo.output.push(`Process error: ${error.message}`);
+      console.error(`Script ${child.pid} error:`, error);
+    });
+    
+    console.log(`✅ Script started: ${scriptInfo.actualCommand || script} (PID: ${child.pid}) on port ${actualPort}`);
+    if (portMessage) {
+      console.log(`ℹ️  ${portMessage}`);
+    }
+    
+    return {
+      success: true,
+      pid: child.pid,
+      command: script,
+      actualCommand: scriptInfo.actualCommand,
+      port: actualPort,
+      requestedPort: port,
+      portMessage: portMessage
+    };
+  } catch (error) {
+    console.error('Failed to execute script:', error);
+    throw new Error(`Failed to execute script: ${error.message}`);
+  }
+}
+
+async function stopScript(pid) {
+  try {
+    const scriptInfo = runningScripts.get(pid);
+    if (!scriptInfo) {
+      throw new Error(`No script found with PID ${pid}`);
+    }
+    
+    if (!scriptInfo.running) {
+      throw new Error(`Script ${pid} is not running`);
+    }
+    
+    // Kill the process
+    scriptInfo.process.kill('SIGTERM');
+    
+    // Wait a bit, then force kill if necessary
+    setTimeout(() => {
+      if (scriptInfo.running) {
+        scriptInfo.process.kill('SIGKILL');
+      }
+    }, 5000);
+    
+    scriptInfo.running = false;
+    scriptInfo.output.push('Process terminated by user');
+    
+    console.log(`🛑 Script stopped: PID ${pid}`);
+    
+    return {
+      success: true,
+      pid: pid,
+      message: `Script ${pid} stopped`
+    };
+  } catch (error) {
+    console.error('Failed to stop script:', error);
+    throw new Error(`Failed to stop script: ${error.message}`);
+  }
+}
+
+function getScriptOutput(pid) {
+  const scriptInfo = runningScripts.get(pid);
+  if (!scriptInfo) {
+    return {
+      success: false,
+      error: `No script found with PID ${pid}`
+    };
+  }
+  
+  // Track what we've already sent to avoid spam
+  if (!scriptInfo.lastSentIndex) {
+    scriptInfo.lastSentIndex = 0;
+  }
+  
+  // Only return new output since last request
+  const newOutput = scriptInfo.output.slice(scriptInfo.lastSentIndex);
+  scriptInfo.lastSentIndex = scriptInfo.output.length;
+  
+  return {
+    success: true,
+    output: newOutput, // Return only new lines
+    running: scriptInfo.running,
+    pid: pid
+  };
+}
+
+async function createDesktopApp(appName, port) {
+  try {
+    // Find the current running script for this port
+    let currentScript = null;
+    for (const [pid, scriptInfo] of runningScripts.entries()) {
+      if (scriptInfo.port === port && scriptInfo.running) {
+        currentScript = scriptInfo;
+        break;
+      }
+    }
+    
+    if (!currentScript) {
+      throw new Error(`No running script found on port ${port}. Please start a script first.`);
+    }
+    
+    const desktopAppsDir = path.join(require('os').homedir(), 'Desktop', 'LocalWrap-Apps');
+    const appDir = path.join(desktopAppsDir, appName);
+    
+    // Create directories
+    if (!fs.existsSync(desktopAppsDir)) {
+      fs.mkdirSync(desktopAppsDir, { recursive: true });
+    }
+    
+    if (!fs.existsSync(appDir)) {
+      fs.mkdirSync(appDir, { recursive: true });
+    }
+    
+    // Create package.json
+    const packageJson = {
+      name: appName.toLowerCase().replace(/\s+/g, '-'),
+      version: '1.0.0',
+      description: `Desktop app that runs: ${currentScript.command}`,
+      main: 'main.js',
+      scripts: {
+        start: 'electron .'
+      },
+      dependencies: {
+        electron: '^32.0.0'
+      }
+    };
+    
+    fs.writeFileSync(
+      path.join(appDir, 'package.json'),
+      JSON.stringify(packageJson, null, 2)
+    );
+    
+    // Create main.js that runs the script AND shows the web view
+    const mainJs = `
+const { app, BrowserWindow, shell } = require('electron');
+const { spawn } = require('child_process');
+const path = require('path');
+
+let mainWindow;
+let scriptProcess;
+
+async function checkPortAvailable(port) {
+  return new Promise((resolve) => {
+    const net = require('net');
+    const server = net.createServer();
+    
+    server.listen(port, (err) => {
+      if (err) {
+        resolve(false);
+      } else {
+        server.once('close', () => resolve(true));
+        server.close();
+      }
+    });
+    
+    server.on('error', () => resolve(false));
+  });
+}
+
+async function startScript() {
+  console.log('Starting script: ${currentScript.command}');
+  
+  // Parse script command
+  const [command, ...args] = '${currentScript.command}'.split(' ');
+  
+  // Start the script process
+  scriptProcess = spawn(command, args, {
+    cwd: process.cwd(),
+    env: { ...process.env, PORT: '${port}' },
+    stdio: ['pipe', 'pipe', 'pipe']
+  });
+  
+  scriptProcess.stdout.on('data', (data) => {
+    console.log('Script output:', data.toString());
+  });
+  
+  scriptProcess.stderr.on('data', (data) => {
+    console.error('Script error:', data.toString());
+  });
+  
+  scriptProcess.on('close', (code) => {
+    console.log('Script exited with code:', code);
+  });
+  
+  scriptProcess.on('error', (error) => {
+    console.error('Script process error:', error);
+  });
+  
+  // Wait a bit for the server to start
+  await new Promise(resolve => setTimeout(resolve, 3000));
+}
+
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      webSecurity: true
+    },
+    title: '${appName}',
+    icon: path.join(__dirname, 'icon.png')
+  });
+
+  // Handle external links
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Load the localhost URL
+  mainWindow.loadURL('http://localhost:${port}');
+  
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    // Stop the script when window closes
+    if (scriptProcess && !scriptProcess.killed) {
+      scriptProcess.kill('SIGTERM');
+    }
+  });
+}
+
+app.whenReady().then(async () => {
+  // Start the script first
+  await startScript();
+  
+  // Then create the window
+  createWindow();
+});
+
+app.on('window-all-closed', () => {
+  // Stop the script when app quits
+  if (scriptProcess && !scriptProcess.killed) {
+    scriptProcess.kill('SIGTERM');
+  }
+  
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+
+app.on('before-quit', () => {
+  // Ensure script is stopped
+  if (scriptProcess && !scriptProcess.killed) {
+    scriptProcess.kill('SIGTERM');
+  }
+});
+`;
+    
+    fs.writeFileSync(path.join(appDir, 'main.js'), mainJs);
+    
+    // Copy icon
+    const iconSource = path.join(__dirname, 'assets', 'icon.png');
+    const iconDest = path.join(appDir, 'icon.png');
+    if (fs.existsSync(iconSource)) {
+      fs.copyFileSync(iconSource, iconDest);
+    }
+    
+    // Create a README with instructions
+    const readme = `# ${appName}
+
+This desktop app runs the following script and displays it in a web browser:
+
+**Script:** \`${currentScript.command}\`
+**Port:** ${port}
+
+## To run this app:
+
+1. Install dependencies: \`npm install\`
+2. Start the app: \`npm start\`
+
+The app will automatically start the script and open a window showing the web interface.
+
+## What this app does:
+
+1. Runs the script: \`${currentScript.command}\`
+2. Waits for the server to start on port ${port}
+3. Opens an Electron window pointing to http://localhost:${port}
+4. Stops the script when you close the app
+
+Generated by LocalWrap on ${new Date().toISOString()}
+`;
+    
+    fs.writeFileSync(path.join(appDir, 'README.md'), readme);
+    
+    console.log(`✅ Desktop app created: ${appDir}`);
+    console.log(`   Script: ${currentScript.command}`);
+    console.log(`   Port: ${port}`);
+    
+    // Auto-install dependencies and launch the app
+    const { spawn } = require('child_process');
+    
+    console.log(`📦 Installing dependencies for ${appName}...`);
+    
+    return new Promise((resolve, reject) => {
+      // Install npm dependencies
+      const npmInstall = spawn('npm', ['install'], {
+        cwd: appDir,
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+      
+      npmInstall.on('close', (code) => {
+        if (code !== 0) {
+          console.error(`npm install failed with code ${code}`);
+          reject(new Error(`Failed to install dependencies: npm install exited with code ${code}`));
+          return;
+        }
+        
+        console.log(`🚀 Launching ${appName}...`);
+        
+        // Launch the app
+        const appProcess = spawn('npm', ['start'], {
+          cwd: appDir,
+          detached: true,
+          stdio: 'ignore'
+        });
+        
+        // Detach the process so it runs independently
+        appProcess.unref();
+        
+        console.log(`✅ Desktop app launched: ${appName}`);
+        
+        resolve({
+          success: true,
+          appName: appName,
+          path: appDir,
+          port: port,
+          script: currentScript.command,
+          launched: true
+        });
+      });
+      
+      npmInstall.on('error', (error) => {
+        console.error(`npm install error:`, error);
+        reject(new Error(`Failed to install dependencies: ${error.message}`));
+      });
+    });
+  } catch (error) {
+    console.error('Failed to create desktop app:', error);
+    throw new Error(`Failed to create desktop app: ${error.message}`);
+  }
+}
+
+// Directory Selection Function
+async function selectDirectory() {
+  try {
+    const { dialog } = require('electron');
+    
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory'],
+      title: 'Select Working Directory',
+      buttonLabel: 'Select Directory'
+    });
+    
+    if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+      return {
+        success: false,
+        cancelled: true,
+        message: 'Directory selection cancelled'
+      };
+    }
+    
+    const selectedPath = result.filePaths[0];
+    
+    // Validate the selected directory
+    if (!fs.existsSync(selectedPath)) {
+      return {
+        success: false,
+        error: 'Selected directory does not exist'
+      };
+    }
+    
+    const stats = fs.statSync(selectedPath);
+    if (!stats.isDirectory()) {
+      return {
+        success: false,
+        error: 'Selected path is not a directory'
+      };
+    }
+    
+    console.log(`📁 Working directory selected: ${selectedPath}`);
+    
+    return {
+      success: true,
+      path: selectedPath
+    };
+  } catch (error) {
+    console.error('Failed to select directory:', error);
+    throw new Error(`Failed to select directory: ${error.message}`);
+  }
 }
 
 function createWindow() {
@@ -544,6 +1183,15 @@ app.on('before-quit', () => {
     serverInfo.instance.close();
   }
   servers.clear();
+  
+  // Clean up all running scripts
+  for (const [pid, scriptInfo] of runningScripts.entries()) {
+    if (scriptInfo.running && scriptInfo.process) {
+      console.log(`Stopping script PID ${pid} on app quit`);
+      scriptInfo.process.kill('SIGTERM');
+    }
+  }
+  runningScripts.clear();
 });
 
 // Security: Prevent multiple instances

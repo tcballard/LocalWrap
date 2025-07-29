@@ -1,7 +1,7 @@
 {
     "name": "localwrap",
     "version": "1.0.0",
-    "description": "Secure desktop wrapper for localhost development servers",
+    "description": "Desktop development server - Turn scripts into desktop apps",
     "main": "main.js",
     "scripts": {
         "start": "electron .",
@@ -24,7 +24,13 @@
         "security-check": "npx electron-builder --dir --config.nsis.oneClick=false",
         "test": "jest",
         "test:watch": "jest --watch",
-        "test:coverage": "jest --coverage"
+        "test:coverage": "jest --coverage",
+        "pack": "electron-builder --dir",
+        "release": "electron-builder --publish=never",
+        "release:win": "electron-builder --win --publish=never",
+        "release:mac": "electron-builder --mac --publish=never",
+        "release:linux": "electron-builder --linux --publish=never",
+        "release:all": "electron-builder --win --mac --linux --publish=never"
     },
     "keywords": [
         "electron",
@@ -52,38 +58,65 @@
     "build": {
         "appId": "com.localwrap.app",
         "productName": "LocalWrap",
+        "copyright": "Copyright © 2025 Tom Ballard",
         "directories": {
             "output": "dist"
         },
         "files": [
             "main.js",
             "preload.js",
-            "server.js",
             "public/**/*",
             "!public/**/*.md",
             "assets/**/*",
             "node_modules/**/*",
             "!node_modules/**/test/**/*",
-            "!node_modules/**/*.d.ts"
+            "!node_modules/**/*.d.ts",
+            "!node_modules/**/.bin",
+            "!**/node_modules/.cache"
         ],
+        "compression": "maximum",
         "win": {
-            "target": "nsis",
+            "target": [
+                {
+                    "target": "nsis",
+                    "arch": ["x64", "ia32"]
+                },
+                {
+                    "target": "portable",
+                    "arch": ["x64"]
+                }
+            ],
             "icon": "assets/icon.ico",
-            "requestedExecutionLevel": "asInvoker"
+            "requestedExecutionLevel": "asInvoker",
+            "publisherName": "Tom Ballard",
+            "verifyUpdateCodeSignature": false
         },
         "mac": {
             "target": "dmg",
-            "icon": "assets/icon.icns"
+            "icon": "assets/icon.icns",
+            "category": "public.app-category.developer-tools"
         },
         "linux": {
             "target": "AppImage",
-            "icon": "assets/icon.png"
+            "icon": "assets/icon.png",
+            "category": "Development"
         },
         "nsis": {
             "oneClick": false,
             "allowToChangeInstallationDirectory": true,
+            "allowElevation": false,
             "createDesktopShortcut": "always",
-            "createStartMenuShortcut": true
+            "createStartMenuShortcut": true,
+            "menuCategory": "Development Tools",
+            "shortcutName": "LocalWrap",
+            "uninstallDisplayName": "LocalWrap - Desktop Development Server",
+            "installerIcon": "assets/icon.ico",
+            "uninstallerIcon": "assets/icon.ico",
+            "installerHeader": "assets/icon.ico",
+            "include": "build/installer.nsh"
+        },
+        "portable": {
+            "artifactName": "LocalWrap-Portable-${version}.${ext}"
         }
     }
 }
