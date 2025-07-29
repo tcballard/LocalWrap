@@ -5,7 +5,7 @@ LocalWrap is a desktop development server that lets you run scripts and create d
 ## Windows Installation
 
 ### Option 1: Installer (Recommended)
-1. Download `LocalWrap-Setup-1.0.0.exe` from the releases page
+1. Download `LocalWrap Setup 1.0.0.exe` from the releases page
 2. Run the installer - Windows Defender may show a warning (click "More info" → "Run anyway")
 3. Follow the installation wizard
 4. LocalWrap will be installed to `C:\Users\{username}\AppData\Local\Programs\LocalWrap\`
@@ -15,6 +15,28 @@ LocalWrap is a desktop development server that lets you run scripts and create d
 1. Download `LocalWrap-Portable-1.0.0.exe` 
 2. Run directly - no installation required
 3. All settings are stored in the same folder as the executable
+
+## macOS Installation
+
+### DMG Installation (Recommended)
+1. Download `LocalWrap-1.0.0-arm64.dmg` from the releases page
+2. Double-click the DMG file to mount it
+3. Drag LocalWrap.app to your Applications folder
+4. Launch from Applications or Spotlight search
+5. **Important**: On first launch, right-click LocalWrap → "Open" to bypass Gatekeeper warnings
+
+### First Launch on macOS
+- macOS may show "LocalWrap is from an unidentified developer"
+- Right-click the app → "Open" → "Open" to allow it to run
+- This only needs to be done once
+
+## Linux Installation
+
+### AppImage (Universal)
+1. Download `LocalWrap-1.0.0-arm64.AppImage` from the releases page
+2. Make it executable: `chmod +x LocalWrap-1.0.0-arm64.AppImage`
+3. Run directly: `./LocalWrap-1.0.0-arm64.AppImage`
+4. No installation required - works on most Linux distributions
 
 ## First Launch
 
@@ -45,10 +67,18 @@ LocalWrap is a desktop development server that lets you run scripts and create d
 
 ## Uninstallation
 
+### Windows
 1. Go to **Settings → Apps & Features**
 2. Find **LocalWrap** in the list
 3. Click **Uninstall**
 4. Or use the uninstaller in the installation directory
+
+### macOS
+1. Delete **LocalWrap.app** from Applications folder
+2. Delete generated apps from Desktop/LocalWrap-Apps if desired
+
+### Linux
+1. Simply delete the **LocalWrap-1.0.0-arm64.AppImage** file
 
 ## What LocalWrap Does
 
