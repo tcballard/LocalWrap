@@ -291,27 +291,44 @@
                 servers = data.servers || [];
                 updateServerList();
             } catch (error) {
-                document.getElementById('serverList').innerHTML = 
-                    '<div style="color: red;">Error loading servers: ' + error.message + '</div>';
+                const serverList = document.getElementById('serverList');
+                serverList.textContent = '';
+                const err = document.createElement('div');
+                err.style.color = 'red';
+                err.textContent = 'Error loading servers: ' + error.message;
+                serverList.appendChild(err);
             }
         }
-        
+
         function updateServerList() {
             const serverList = document.getElementById('serverList');
-            
+            serverList.textContent = '';
+
             if (servers.length === 0) {
-                serverList.innerHTML = '<div style="color: #666;">No servers running</div>';
+                const empty = document.createElement('div');
+                empty.style.color = '#666';
+                empty.textContent = 'No servers running';
+                serverList.appendChild(empty);
                 return;
             }
-            
-            const html = servers.map(server => `
-                <div class="server-item">
-                    <span class="server-url" onclick="openServer('${server.url}')">${server.url}</span>
-                    <span class="server-status">${server.status}</span>
-                </div>
-            `).join('');
-            
-            serverList.innerHTML = html;
+
+            servers.forEach(server => {
+                const item = document.createElement('div');
+                item.className = 'server-item';
+
+                const url = document.createElement('span');
+                url.className = 'server-url';
+                url.textContent = server.url;
+                url.addEventListener('click', () => openServer(server.url));
+
+                const status = document.createElement('span');
+                status.className = 'server-status';
+                status.textContent = server.status;
+
+                item.appendChild(url);
+                item.appendChild(status);
+                serverList.appendChild(item);
+            });
         }
         
         function openServer(url) {
