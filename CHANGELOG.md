@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CI release workflow: pushing a `v*` tag builds Windows/macOS/Linux installers on
+  native runners and attaches them to a GitHub Release.
+
 ### Changed
 
 - Relicensed the project under the MIT License (previously proprietary).
+- Replaced the npm-publish workflow with the installer release workflow (a desktop
+  app is distributed as installers, not an npm package).
 - Upgraded Electron (32 → 42), electron-builder (25 → 26), and helmet (7 → 8); updated
   validator to the latest patched release. Resolves all known `npm audit` advisories.
 

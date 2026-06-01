@@ -59,6 +59,13 @@
     "build": {
         "appId": "com.localwrap.app",
         "productName": "LocalWrap",
+        "publish": [
+            {
+                "provider": "github",
+                "owner": "tcballard",
+                "repo": "LocalWrap"
+            }
+        ],
         "directories": {
             "output": "dist"
         },

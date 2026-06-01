@@ -20,12 +20,28 @@ dev servers — no terminal juggling required.
   renderer.
 - **Cross‑platform** — Windows, macOS, and Linux.
 
-## Requirements
+## Download
+
+Grab a prebuilt installer for your platform from the
+[**Releases page**](https://github.com/tcballard/LocalWrap/releases):
+
+| Platform | File |
+| --- | --- |
+| Windows  | `.exe` installer (NSIS) |
+| macOS    | `.dmg` |
+| Linux    | `.AppImage` |
+
+> **Note:** the installers are not code‑signed yet, so Windows SmartScreen and
+> macOS Gatekeeper will warn about an "unknown developer." On Windows choose
+> *More info → Run anyway*; on macOS right‑click the app and choose *Open* the
+> first time.
+
+## Requirements (to build/run from source)
 
 - [Node.js](https://nodejs.org) 18 or newer
 - npm 9 or newer
 
-## Install
+## Install from source
 
 ```bash
 git clone https://github.com/tcballard/LocalWrap.git
