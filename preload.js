@@ -13,7 +13,7 @@ delete window.module;
 
 // Simple app info without IPC
 window.localwrapAPI = {
-  version: '1.0.0',
+  version: '2.0.0',
   platform: 'desktop',
   isElectron: true
 };
