@@ -1,10 +1,16 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
+const { spawn } = require('child_process');
+const { validateScriptCommand } = require('./lib/scriptValidation');
 
 let mainWindow;
 let tray;
+
+// Dev-script execution state: pid -> { child, command, port, output }
+const runningScripts = new Map();
+const MAX_OUTPUT_LINES = 500;
 
 // Server Management System
 const servers = new Map(); // port -> server instance
@@ -48,6 +54,17 @@ async function checkPortAvailable(port) {
     
     server.on('error', () => resolve(false));
   });
+}
+
+// Find a free port at or after `preferred` (bounded scan).
+async function findAvailablePort(preferred) {
+  let candidate = preferred;
+  for (let i = 0; i < 100 && candidate <= 65535; i++, candidate++) {
+    if (await checkPortAvailable(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('No available port found.');
 }
 
 async function startServer(port) {
@@ -505,7 +522,111 @@ function createTray() {
   });
 }
 
-// === NO IPC HANDLERS - REMOVED TO ELIMINATE ERRORS ===
+// === IPC HANDLERS (privileged dev-script actions, desktop-only) ===
+// These are exposed ONLY through the preload contextBridge, so a plain
+// browser hitting the localhost server cannot reach them.
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function killRunningScripts() {
+  for (const [, info] of runningScripts.entries()) {
+    try { info.child.kill(); } catch (_) { /* ignore */ }
+  }
+  runningScripts.clear();
+}
+
+function registerIpcHandlers() {
+  // Run a dev script (allowlisted command, no shell on macOS/Linux).
+  ipcMain.handle('script:run', async (event, payload = {}) => {
+    const { command, port, workingDir } = payload;
+
+    // Throws on disallowed command / shell metacharacters.
+    const { command: cmd, args } = validateScriptCommand(command);
+
+    // Validate working directory (default to LocalWrap's cwd).
+    let cwd = process.cwd();
+    if (workingDir) {
+      if (!fs.existsSync(workingDir) || !fs.statSync(workingDir).isDirectory()) {
+        throw new Error(`Working directory does not exist: ${workingDir}`);
+      }
+      cwd = workingDir;
+    }
+
+    // Choose a free port (avoid LocalWrap's own ports / busy ports).
+    let requestedPort = parseInt(port, 10);
+    if (isNaN(requestedPort) || requestedPort < 1000 || requestedPort > 65535) {
+      requestedPort = DEFAULT_PORT + 1;
+    }
+    const actualPort = await findAvailablePort(requestedPort);
+
+    // Windows resolves npm/yarn/etc via a shell; macOS/Linux never use one.
+    const isWin = process.platform === 'win32';
+    const child = spawn(cmd, args, {
+      cwd,
+      env: { ...process.env, PORT: String(actualPort) },
+      shell: isWin,
+    });
+
+    const pid = child.pid;
+    const info = { child, command, port: actualPort, output: [] };
+    runningScripts.set(pid, info);
+
+    const pushLine = (line) => {
+      info.output.push(line);
+      if (info.output.length > MAX_OUTPUT_LINES) info.output.shift();
+      sendToRenderer('script:output', { pid, line });
+    };
+
+    const handleChunk = (buf) => {
+      buf.toString().split(/\r?\n/).forEach((line) => {
+        if (line.length > 0) pushLine(line);
+      });
+    };
+
+    child.stdout.on('data', handleChunk);
+    child.stderr.on('data', handleChunk);
+    child.on('error', (err) => pushLine(`[error] ${err.message}`));
+    child.on('close', (code) => {
+      pushLine(`[process exited with code ${code}]`);
+      runningScripts.delete(pid);
+      sendToRenderer('script:exit', { pid, code });
+    });
+
+    return { pid, port: actualPort, command };
+  });
+
+  // Stop a running script by pid.
+  ipcMain.handle('script:stop', (event, pid) => {
+    const info = runningScripts.get(pid);
+    if (!info) {
+      return { success: false, error: 'No running script with that id.' };
+    }
+    try {
+      info.child.kill();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Native folder picker for the working directory.
+  ipcMain.handle('dir:select', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select working directory',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('dir:current', () => process.cwd());
+}
 
 // App event handlers
 app.whenReady().then(async () => {
@@ -516,6 +637,7 @@ app.whenReady().then(async () => {
     // Then create the window and tray
     createWindow();
     createTray();
+    registerIpcHandlers();
     
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -538,7 +660,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuiting = true;
-  
+
+  // Stop any running dev scripts
+  killRunningScripts();
+
   // Clean up all servers
   for (const [port, serverInfo] of servers.entries()) {
     serverInfo.instance.close();
