@@ -1,0 +1,42 @@
+name: Release
+
+# Build installers for every platform and attach them to a GitHub Release.
+# Trigger by pushing a version tag, e.g.:
+#   git tag v1.0.0 && git push origin v1.0.0
+# electron-builder creates a draft release named after the tag and uploads the
+# installers to it; review the draft and hit "Publish" when you're happy.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # required for electron-builder to create/update the Release
+
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      - name: Build and publish installers
+        run: npm run build -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The installers are unsigned; skip signing so CI doesn't fail looking
+          # for certificates. Add real signing creds here later if you buy certs.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
