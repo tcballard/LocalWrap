@@ -1,6 +1,6 @@
 {
     "name": "localwrap",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "description": "Secure desktop wrapper for localhost development servers",
     "main": "main.js",
     "scripts": {
@@ -72,6 +72,7 @@
         "files": [
             "main.js",
             "preload.js",
+            "lib/**/*",
             "public/**/*",
             "!public/**/*.md",
             "assets/**/*",

@@ -1,10 +1,15 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog } = require('electron');
+const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
+const { startScript } = require('./lib/scriptRunner');
 
 let mainWindow;
 let tray;
+
+// Dev-script execution state: pid -> { child, command, port, output }
+const runningScripts = new Map();
+const MAX_OUTPUT_LINES = 500;
 
 // Server Management System
 const servers = new Map(); // port -> server instance
@@ -48,6 +53,17 @@ async function checkPortAvailable(port) {
     
     server.on('error', () => resolve(false));
   });
+}
+
+// Find a free port at or after `preferred` (bounded scan).
+async function findAvailablePort(preferred) {
+  let candidate = preferred;
+  for (let i = 0; i < 100 && candidate <= 65535; i++, candidate++) {
+    if (await checkPortAvailable(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error('No available port found.');
 }
 
 async function startServer(port) {
@@ -505,7 +521,85 @@ function createTray() {
   });
 }
 
-// === NO IPC HANDLERS - REMOVED TO ELIMINATE ERRORS ===
+// === IPC HANDLERS (privileged dev-script actions, desktop-only) ===
+// These are exposed ONLY through the preload contextBridge, so a plain
+// browser hitting the localhost server cannot reach them.
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function killRunningScripts() {
+  for (const [, info] of runningScripts.entries()) {
+    try { info.child.kill(); } catch (_) { /* ignore */ }
+  }
+  runningScripts.clear();
+}
+
+function registerIpcHandlers() {
+  // Run a dev script (allowlisted command, no shell on macOS/Linux).
+  ipcMain.handle('script:run', async (event, payload = {}) => {
+    const { command, port, workingDir } = payload;
+
+    // Choose a free port (avoid LocalWrap's own ports / busy ports).
+    let requestedPort = parseInt(port, 10);
+    if (isNaN(requestedPort) || requestedPort < 1000 || requestedPort > 65535) {
+      requestedPort = DEFAULT_PORT + 1;
+    }
+    const actualPort = await findAvailablePort(requestedPort);
+
+    // pid is only known after spawn; callbacks read it lazily (output events
+    // fire asynchronously, after state.pid is assigned below).
+    const state = { pid: null, output: [] };
+    const onLine = (line) => {
+      state.output.push(line);
+      if (state.output.length > MAX_OUTPUT_LINES) state.output.shift();
+      sendToRenderer('script:output', { pid: state.pid, line });
+    };
+    const onExit = (code) => {
+      onLine(`[process exited with code ${code}]`);
+      runningScripts.delete(state.pid);
+      sendToRenderer('script:exit', { pid: state.pid, code });
+    };
+
+    // startScript validates the command + working dir (throws on bad input).
+    const child = startScript({ command, cwd: workingDir, port: actualPort, onLine, onExit });
+    state.pid = child.pid;
+    runningScripts.set(child.pid, { child, command, port: actualPort, output: state.output });
+
+    return { pid: child.pid, port: actualPort, command };
+  });
+
+  // Stop a running script by pid.
+  ipcMain.handle('script:stop', (event, pid) => {
+    const info = runningScripts.get(pid);
+    if (!info) {
+      return { success: false, error: 'No running script with that id.' };
+    }
+    try {
+      info.child.kill();
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  });
+
+  // Native folder picker for the working directory.
+  ipcMain.handle('dir:select', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select working directory',
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  ipcMain.handle('dir:current', () => process.cwd());
+}
 
 // App event handlers
 app.whenReady().then(async () => {
@@ -516,6 +610,7 @@ app.whenReady().then(async () => {
     // Then create the window and tray
     createWindow();
     createTray();
+    registerIpcHandlers();
     
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -538,7 +633,10 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   app.isQuiting = true;
-  
+
+  // Stop any running dev scripts
+  killRunningScripts();
+
   // Clean up all servers
   for (const [port, serverInfo] of servers.entries()) {
     serverInfo.instance.close();

@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-06-02
+
+### Added
+
+- **Run a dev script** from the in-window panel: start/stop a command (e.g.
+  `npm run dev`) with live streamed output and a working-directory picker.
+  Privileged actions run over Electron IPC (never the localhost HTTP surface),
+  restricted to a dev-tool allowlist (`npm`, `npx`, `yarn`, `pnpm`, `node`,
+  `bun`, `python`, `python3`, `deno`), with shell metacharacters rejected and no
+  shell used on macOS/Linux.
+
+### Fixed
+
+- The in-window control panel never ran in v2.0.0: the strict CSP
+  (`script-src 'self'`, `script-src-attr 'none'`) blocked the inline `<script>`
+  and `onclick=` handlers. Renderer JS now lives in `public/app.js`
+  (same-origin, CSP-allowed) and all controls are wired via `addEventListener`.
+
 ## [2.0.0] - 2026-06-01
 
 LocalWrap is now **free and open source**. This release relicenses the project,
