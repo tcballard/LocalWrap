@@ -2,8 +2,7 @@ const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = 
 const path = require('path');
 const fs = require('fs');
 const url = require('url');
-const { spawn } = require('child_process');
-const { validateScriptCommand } = require('./lib/scriptValidation');
+const { startScript } = require('./lib/scriptRunner');
 
 let mainWindow;
 let tray;
@@ -544,18 +543,6 @@ function registerIpcHandlers() {
   ipcMain.handle('script:run', async (event, payload = {}) => {
     const { command, port, workingDir } = payload;
 
-    // Throws on disallowed command / shell metacharacters.
-    const { command: cmd, args } = validateScriptCommand(command);
-
-    // Validate working directory (default to LocalWrap's cwd).
-    let cwd = process.cwd();
-    if (workingDir) {
-      if (!fs.existsSync(workingDir) || !fs.statSync(workingDir).isDirectory()) {
-        throw new Error(`Working directory does not exist: ${workingDir}`);
-      }
-      cwd = workingDir;
-    }
-
     // Choose a free port (avoid LocalWrap's own ports / busy ports).
     let requestedPort = parseInt(port, 10);
     if (isNaN(requestedPort) || requestedPort < 1000 || requestedPort > 65535) {
@@ -563,40 +550,26 @@ function registerIpcHandlers() {
     }
     const actualPort = await findAvailablePort(requestedPort);
 
-    // Windows resolves npm/yarn/etc via a shell; macOS/Linux never use one.
-    const isWin = process.platform === 'win32';
-    const child = spawn(cmd, args, {
-      cwd,
-      env: { ...process.env, PORT: String(actualPort) },
-      shell: isWin,
-    });
-
-    const pid = child.pid;
-    const info = { child, command, port: actualPort, output: [] };
-    runningScripts.set(pid, info);
-
-    const pushLine = (line) => {
-      info.output.push(line);
-      if (info.output.length > MAX_OUTPUT_LINES) info.output.shift();
-      sendToRenderer('script:output', { pid, line });
+    // pid is only known after spawn; callbacks read it lazily (output events
+    // fire asynchronously, after state.pid is assigned below).
+    const state = { pid: null, output: [] };
+    const onLine = (line) => {
+      state.output.push(line);
+      if (state.output.length > MAX_OUTPUT_LINES) state.output.shift();
+      sendToRenderer('script:output', { pid: state.pid, line });
+    };
+    const onExit = (code) => {
+      onLine(`[process exited with code ${code}]`);
+      runningScripts.delete(state.pid);
+      sendToRenderer('script:exit', { pid: state.pid, code });
     };
 
-    const handleChunk = (buf) => {
-      buf.toString().split(/\r?\n/).forEach((line) => {
-        if (line.length > 0) pushLine(line);
-      });
-    };
+    // startScript validates the command + working dir (throws on bad input).
+    const child = startScript({ command, cwd: workingDir, port: actualPort, onLine, onExit });
+    state.pid = child.pid;
+    runningScripts.set(child.pid, { child, command, port: actualPort, output: state.output });
 
-    child.stdout.on('data', handleChunk);
-    child.stderr.on('data', handleChunk);
-    child.on('error', (err) => pushLine(`[error] ${err.message}`));
-    child.on('close', (code) => {
-      pushLine(`[process exited with code ${code}]`);
-      runningScripts.delete(pid);
-      sendToRenderer('script:exit', { pid, code });
-    });
-
-    return { pid, port: actualPort, command };
+    return { pid: child.pid, port: actualPort, command };
   });
 
   // Stop a running script by pid.
