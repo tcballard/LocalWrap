@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm test
+
+      # Surface high-severity advisories without blocking unrelated PRs.
+      # Dependabot opens the actual fix PRs (see .github/dependabot.yml).
+      - name: Security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
