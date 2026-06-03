@@ -17,7 +17,7 @@ if (typeof window !== 'undefined') {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.1.1',
+  version: '2.2.0',
   platform: 'desktop',
   isElectron: true,
 

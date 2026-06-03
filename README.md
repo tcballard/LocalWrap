@@ -28,8 +28,11 @@ Grab a prebuilt installer for your platform from the
 | Platform | File |
 | --- | --- |
 | Windows  | `.exe` installer (NSIS) |
-| macOS    | `.dmg` |
+| macOS    | `.dmg` (Intel + Apple Silicon) |
 | Linux    | `.AppImage` |
+
+LocalWrap checks for updates on launch (and via the tray's **Check for Updates…**).
+Auto-update works on Windows and Linux today; signed macOS auto-update is planned.
 
 > **Note:** the installers are not code‑signed yet, so Windows SmartScreen and
 > macOS Gatekeeper will warn about an "unknown developer." On Windows choose

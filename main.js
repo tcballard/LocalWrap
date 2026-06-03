@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { autoUpdater } = require('electron-updater');
 const { startScript } = require('./lib/scriptRunner');
 const { validateLocalhostURL } = require('./lib/urlValidation');
 
@@ -418,6 +419,30 @@ function createWindow() {
   // Removed all DevTools functionality
 }
 
+// Auto-update via electron-updater. Reads the GitHub publish config + latest*.yml
+// from releases. Works on Windows/Linux out of the box; silent macOS updates
+// additionally require code signing (a paid follow-on), so unsigned mac builds
+// will simply report no update / error rather than self-updating.
+function checkForUpdates({ silent = false } = {}) {
+  if (!app.isPackaged) {
+    if (!silent) {
+      dialog.showMessageBox(mainWindow, {
+        type: 'info',
+        title: 'Check for Updates',
+        message: 'Updates are only available in the installed app.',
+        buttons: ['OK'],
+      });
+    }
+    return;
+  }
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error('Update check failed:', err);
+    if (!silent) {
+      dialog.showErrorBox('Update check failed', err.message);
+    }
+  });
+}
+
 function createTray() {
   // Create tray icon
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
@@ -467,6 +492,10 @@ function createTray() {
       enabled: false
     },
     { type: 'separator' },
+    {
+      label: 'Check for Updates…',
+      click: () => checkForUpdates(),
+    },
     {
       label: 'About LocalWrap',
       click: () => {
@@ -594,6 +623,9 @@ app.whenReady().then(async () => {
     createWindow();
     createTray();
     registerIpcHandlers();
+
+    // Check for updates on launch (no-op in dev / unpackaged).
+    checkForUpdates({ silent: true });
     
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
