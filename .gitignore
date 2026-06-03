@@ -101,3 +101,5 @@ Thumbs.db
 *.tmp
 *.temp
 *.log 
+# Local preview-tool config
+.claude/launch.json
