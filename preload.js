@@ -8,13 +8,16 @@
  */
 const { contextBridge, ipcRenderer } = require('electron');
 
-// Basic security: remove dangerous globals.
-delete window.require;
-delete window.exports;
-delete window.module;
+// Basic security: remove dangerous globals. Guarded so the module can be
+// required in a non-browser (test) environment.
+if (typeof window !== 'undefined') {
+  delete window.require;
+  delete window.exports;
+  delete window.module;
+}
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.1.0',
+  version: '2.1.1',
   platform: 'desktop',
   isElectron: true,
 
