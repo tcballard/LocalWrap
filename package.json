@@ -1,6 +1,6 @@
 {
     "name": "localwrap",
-    "version": "2.1.1",
+    "version": "2.2.0",
     "description": "Secure desktop wrapper for localhost development servers",
     "main": "main.js",
     "scripts": {
@@ -59,6 +59,7 @@
         "prettier": "^3.8.3"
     },
     "dependencies": {
+        "electron-updater": "^6.8.3",
         "express": "^4.19.2",
         "express-rate-limit": "^7.2.0",
         "helmet": "^8.0.0"
@@ -93,8 +94,13 @@
             "requestedExecutionLevel": "asInvoker"
         },
         "mac": {
-            "target": "dmg",
-            "icon": "assets/icon.icns"
+            "icon": "assets/icon.icns",
+            "target": [
+                {
+                    "target": "dmg",
+                    "arch": ["x64", "arm64"]
+                }
+            ]
         },
         "linux": {
             "target": "AppImage",
