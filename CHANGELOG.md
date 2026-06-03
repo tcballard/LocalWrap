@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2026-06-03
+
+### Changed
+
+- Test integrity: `validateLocalhostURL` extracted to `lib/urlValidation.js` and
+  imported by both `main.js` and its test (the tests previously re-declared copies
+  of the code, so they passed even when the app was broken). The preload test now
+  exercises the real `contextBridge` surface.
+- Added ESLint + Prettier with a `lint`/`format` script; `lint` now runs in CI.
+- Removed the unused `validator` dependency.
+
 ## [2.1.0] - 2026-06-02
 
 ### Added

@@ -1,8 +1,8 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const url = require('url');
 const { startScript } = require('./lib/scriptRunner');
+const { validateLocalhostURL } = require('./lib/urlValidation');
 
 let mainWindow;
 let tray;
@@ -19,22 +19,6 @@ const DEFAULT_PORT = process.env.PORT ||
                     3000;
 
 console.log(`🚀 LocalWrap initializing with default port ${DEFAULT_PORT}`);
-
-// Security: Validate that URL is actually localhost
-function validateLocalhostURL(targetURL) {
-  try {
-    const parsedURL = new URL(targetURL);
-    const port = parseInt(parsedURL.port);
-    return (
-      (parsedURL.hostname === 'localhost' || parsedURL.hostname === '127.0.0.1') &&
-      port >= 1000 && port <= 65535 && // Valid port range
-      parsedURL.protocol === 'http:'
-    );
-  } catch (error) {
-    console.error('Invalid URL:', error);
-    return false;
-  }
-}
 
 // Server Management Functions
 async function checkPortAvailable(port) {
@@ -82,8 +66,7 @@ async function startServer(port) {
     const express = require('express');
     const helmet = require('helmet');
     const rateLimit = require('express-rate-limit');
-    const validator = require('validator');
-    
+
     const expressApp = express();
     
     // Security middleware
@@ -131,7 +114,7 @@ async function startServer(port) {
     expressApp.use(express.static(publicPath, {
       dotfiles: 'deny',
       index: false,
-      setHeaders: (res, path) => {
+      setHeaders: (res) => {
         res.setHeader('Cache-Control', 'public, max-age=3600');
       }
     }));
@@ -247,8 +230,8 @@ async function startServer(port) {
       res.status(404).json({ error: 'Not found' });
     });
     
-    // Error handler
-    expressApp.use((err, req, res, next) => {
+    // Error handler (4 args required for Express to treat this as one)
+    expressApp.use((err, _req, res, _next) => {
       console.error('Server error:', err);
       res.status(500).json({ error: 'Internal server error' });
     });
@@ -638,7 +621,7 @@ app.on('before-quit', () => {
   killRunningScripts();
 
   // Clean up all servers
-  for (const [port, serverInfo] of servers.entries()) {
+  for (const [, serverInfo] of servers.entries()) {
     serverInfo.instance.close();
   }
   servers.clear();
