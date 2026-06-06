@@ -46,6 +46,13 @@ describe('ProjectLifecycle', () => {
     expect(state.status).toBe('ready');
     expect(state.pid).toBe(1234);
     expect(state.readinessMessage).toBe('Project is ready.');
+    expect(state.diagnosis).toMatchObject({
+      status: 'ready',
+      summary: 'Project is ready.',
+    });
+    expect(state.diagnosisTimeline.map((event) => event.message)).toContain(
+      'http://localhost:3000 responded.'
+    );
     expect(state.logs).toContain('compiled');
     expect(state.logs).toContain('[ready] http://localhost:3000');
     expect(events.some((event) => event.type === 'output')).toBe(true);
@@ -63,6 +70,10 @@ describe('ProjectLifecycle', () => {
     const state = lifecycle.getState('project-1');
     expect(state.status).toBe('running-unresponsive');
     expect(state.readinessMessage).toMatch(/did not respond/);
+    expect(state.diagnosis).toMatchObject({
+      status: 'attention',
+      summary: 'Project is running but the URL is not responding.',
+    });
     expect(state.logs.join('\n')).toMatch(/running-unresponsive/);
   });
 
@@ -78,6 +89,10 @@ describe('ProjectLifecycle', () => {
       status: 'failed',
       error: 'spawn failed',
       readinessMessage: 'Project failed to start.',
+      diagnosis: {
+        status: 'failed',
+        summary: 'Project failed to start.',
+      },
     });
   });
 
@@ -100,6 +115,10 @@ describe('ProjectLifecycle', () => {
       status: 'stopped',
       lastExitCode: 1,
       lastStoppedAt: '2026-06-06T00:00:00.000Z',
+      diagnosis: {
+        status: 'failed',
+        summary: 'Process exited with code 1.',
+      },
     });
 
     lifecycle.clearLogs('project-1');

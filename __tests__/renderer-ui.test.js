@@ -34,6 +34,24 @@ describe('renderer UI surface', () => {
     }
   });
 
+  test('Project Doctor panel appears above logs with safe controls', () => {
+    for (const id of [
+      'doctorPanel',
+      'doctorSummary',
+      'doctorChecks',
+      'doctorTimeline',
+      'copyDoctorReportBtn',
+      'revealProjectDirBtn',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+
+    expect(html.indexOf('id="doctorPanel"')).toBeLessThan(html.indexOf('id="terminal"'));
+    expect(html).toContain('Project Doctor');
+    expect(html).toContain('Copy Report');
+    expect(html).toContain('Reveal Folder');
+  });
+
   test('status strip exposes selected-project context', () => {
     expect(html).toContain('id="statusBar"');
     expect(html).toContain('id="statusRight"');

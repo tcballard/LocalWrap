@@ -52,6 +52,7 @@ jest.mock('electron', () => ({
   })),
   shell: {
     openExternal: jest.fn(),
+    openPath: jest.fn(),
   },
   dialog: {
     showMessageBox: jest.fn(),

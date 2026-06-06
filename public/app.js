@@ -8,6 +8,23 @@
   ]);
   const AUTO_URL_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/;
   const FIELD_NAMES = ['name', 'cwd', 'command', 'port', 'url'];
+  const DOCTOR_CHECKS = [
+    ['directory', 'Directory'],
+    ['command', 'Command'],
+    ['dependencies', 'Dependencies'],
+    ['port', 'Port'],
+    ['url', 'URL'],
+    ['process', 'Process'],
+    ['readiness', 'Readiness'],
+  ];
+  const DOCTOR_ICONS = {
+    pass: 'OK',
+    warn: '!',
+    fail: 'X',
+    running: '...',
+    pending: '-',
+  };
+  const DOCTOR_MUTATING_ACTIONS = new Set(['use-free-port', 'sync-url-to-port']);
 
   const state = {
     api: null,
@@ -17,6 +34,7 @@
     scripts: [],
     inspectionWarnings: [],
     validation: null,
+    diagnosis: null,
     validationSeq: 0,
     validationTimer: null,
     commandVisible: false,
@@ -48,7 +66,24 @@
         status: 'stopped',
         pid: null,
         logs: [],
+        diagnosis: null,
       },
+    };
+  }
+
+  function createDefaultDiagnosis() {
+    return {
+      status: 'idle',
+      summary: 'Project Doctor has not checked this project yet.',
+      checks: DOCTOR_CHECKS.map(([id, label]) => ({
+        id,
+        label,
+        status: 'pending',
+        message: 'Not checked yet.',
+        actions: [],
+      })),
+      timeline: [],
+      actions: [],
     };
   }
 
@@ -64,6 +99,9 @@
         lastExitCode: project.runtime?.lastExitCode ?? project.runtime?.exitCode ?? null,
         lastStartedAt: project.runtime?.lastStartedAt || project.runtime?.startedAt || null,
         lastStoppedAt: project.runtime?.lastStoppedAt || project.runtime?.stoppedAt || null,
+        diagnosis: project.runtime?.diagnosis || null,
+        diagnosisTimeline:
+          project.runtime?.diagnosisTimeline || project.runtime?.diagnosis?.timeline || [],
       },
     };
   }
@@ -203,6 +241,7 @@
     state.scripts = [];
     state.inspectionWarnings = [];
     state.validation = null;
+    state.diagnosis = null;
     state.commandVisible = false;
     const project = selectedProject();
     render();
@@ -305,10 +344,100 @@
     updateActionState();
   }
 
+  function diagnosisForProject(project) {
+    if (!project) {
+      return createDefaultDiagnosis();
+    }
+
+    return project.runtime?.diagnosis || state.diagnosis || createDefaultDiagnosis();
+  }
+
+  function latestTimelineText(diagnosis) {
+    const latest = diagnosis.timeline?.at(-1);
+    if (!latest) {
+      return 'No checks yet.';
+    }
+    return latest.message;
+  }
+
+  function isDoctorActionDisabled(actionId, project) {
+    if (!project) {
+      return true;
+    }
+
+    if (actionId === 'reveal-command') {
+      return false;
+    }
+
+    const saved = Boolean(project && !project.isDraft);
+    if (actionId === 'copy-report' || actionId === 'reveal-directory') {
+      return !saved;
+    }
+
+    if (DOCTOR_MUTATING_ACTIONS.has(actionId)) {
+      if (project.isDraft) {
+        return false;
+      }
+      return !saved || isProjectActive(project) || isFormDirty();
+    }
+
+    return true;
+  }
+
+  function renderDoctor(project) {
+    const diagnosis = diagnosisForProject(project);
+    state.elements.doctorPanel.className = `doctor ${diagnosis.status || 'idle'}`;
+    state.elements.doctorSummary.textContent = diagnosis.summary || 'Not checked yet.';
+    state.elements.doctorTimeline.textContent = latestTimelineText(diagnosis);
+    state.elements.copyDoctorReportBtn.disabled = isDoctorActionDisabled('copy-report', project);
+    state.elements.revealProjectDirBtn.disabled = isDoctorActionDisabled(
+      'reveal-directory',
+      project
+    );
+    state.elements.doctorChecks.textContent = '';
+
+    diagnosis.checks.forEach((check) => {
+      const row = document.createElement('div');
+      row.className = `doctor-row ${check.status || 'pending'}`;
+
+      const stateEl = document.createElement('span');
+      stateEl.className = 'doctor-state';
+      stateEl.textContent = DOCTOR_ICONS[check.status] || '-';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'doctor-label';
+      labelEl.textContent = check.label;
+
+      const messageEl = document.createElement('span');
+      messageEl.className = 'doctor-message';
+      messageEl.textContent = check.message;
+
+      row.appendChild(stateEl);
+      row.appendChild(labelEl);
+      row.appendChild(messageEl);
+
+      const action = check.actions?.[0];
+      if (action) {
+        const actionBtn = document.createElement('button');
+        actionBtn.type = 'button';
+        actionBtn.className = 'btn';
+        actionBtn.dataset.doctorAction = action.id;
+        actionBtn.disabled = isDoctorActionDisabled(action.id, project);
+        actionBtn.textContent = action.label;
+        row.appendChild(actionBtn);
+      } else {
+        row.appendChild(document.createElement('span'));
+      }
+
+      state.elements.doctorChecks.appendChild(row);
+    });
+  }
+
   function renderRuntime(project) {
     const runtime = project.runtime || { status: 'stopped', logs: [] };
     const logs = runtime.logs && runtime.logs.length > 0 ? runtime.logs : ['No output yet.'];
 
+    renderDoctor(project);
     state.elements.statusBadge.className = `badge ${runtime.status || 'stopped'}`;
     state.elements.statusBadge.textContent = statusLabel(runtime.status);
     state.elements.pidLabel.textContent = `PID: ${runtime.pid || '-'}`;
@@ -459,6 +588,9 @@
     state.elements.copyLogsBtn.disabled = !saved;
     state.elements.clearLogsBtn.disabled = !saved;
     state.elements.revealCommandBtn.disabled = !project;
+    if (state.elements.doctorPanel) {
+      renderDoctor(project);
+    }
     updateStatusRight();
   }
 
@@ -490,6 +622,7 @@
     const project = selectedProject();
     if (!project) {
       state.validation = null;
+      state.diagnosis = null;
       applyValidationMessages();
       updateActionState();
       return { valid: false, errors: [], warnings: [] };
@@ -502,8 +635,16 @@
     }
 
     state.validation = result;
+    if (state.api.diagnoseProjectDraft) {
+      const diagnosis = await state.api.diagnoseProjectDraft(readFormProject());
+      if (seq !== state.validationSeq) {
+        return result;
+      }
+      state.diagnosis = diagnosis;
+    }
     applyValidationMessages();
     updateActionState();
+    renderDoctor(selectedProject());
 
     if (!silent && !result.valid) {
       setStatus('Fix project details before continuing.', 'error');
@@ -533,6 +674,7 @@
     state.scripts = profile.scripts || [];
     state.inspectionWarnings = profile.warnings || [];
     state.validation = null;
+    state.diagnosis = null;
     state.commandVisible = false;
     render();
     await validateCurrentDraft({ silent: true });
@@ -603,6 +745,7 @@
       await state.api.deleteProject(project.id);
       state.selectedId = null;
       state.validation = null;
+      state.diagnosis = null;
       await loadProjects();
       setStatus(`Deleted ${project.name}.`);
     } catch (error) {
@@ -664,6 +807,71 @@
     }
   }
 
+  async function applyDraftDoctorAction(actionId) {
+    if (actionId === 'sync-url-to-port') {
+      state.elements.urlInput.value = getAutoUrl(Number(state.elements.portInput.value));
+      handleFormChange();
+      setStatus('Synced URL to the selected port.');
+      return;
+    }
+
+    if (actionId === 'use-free-port') {
+      const oldPort = Number(state.elements.portInput.value);
+      const port = await state.api.suggestPort(oldPort || 3000);
+      const shouldUpdateUrl =
+        !state.elements.urlInput.value || AUTO_URL_RE.test(state.elements.urlInput.value);
+      state.elements.portInput.value = port;
+      if (shouldUpdateUrl) {
+        state.elements.urlInput.value = getAutoUrl(port);
+      }
+      handleFormChange();
+      setStatus(`Using free port ${port}.`);
+    }
+  }
+
+  async function handleDoctorAction(actionId) {
+    const project = selectedProject();
+    if (!project) return;
+
+    if (actionId === 'reveal-command') {
+      toggleCommandReveal();
+      return;
+    }
+
+    if (project.isDraft) {
+      await applyDraftDoctorAction(actionId);
+      return;
+    }
+
+    if (actionId === 'copy-report') {
+      const result = await state.api.copyDoctorReport(project.id);
+      setStatus(`Copied Doctor report (${result.lines} line(s)).`);
+      return;
+    }
+
+    if (actionId === 'reveal-directory') {
+      await state.api.revealProjectDirectory(project.id);
+      setStatus(`Revealed ${project.name}.`);
+      return;
+    }
+
+    if (DOCTOR_MUTATING_ACTIONS.has(actionId)) {
+      if (isProjectActive(project)) {
+        setStatus('Stop the project before applying Doctor fixes.', 'error');
+        return;
+      }
+      if (isFormDirty()) {
+        setStatus('Save changes before applying Doctor fixes.', 'error');
+        return;
+      }
+
+      const updated = await state.api.applyDoctorAction(project.id, actionId);
+      state.selectedId = updated.id;
+      await loadProjects();
+      setStatus(`Applied Doctor fix for ${updated.name}.`);
+    }
+  }
+
   function updateCommandReveal() {
     const project = selectedProject();
     state.elements.commandReveal.hidden = !state.commandVisible || !project;
@@ -713,6 +921,17 @@
     state.elements.clearLogsBtn.addEventListener('click', () => clearLogs().catch(showError));
     state.elements.copyLogsBtn.addEventListener('click', () => copyLogs().catch(showError));
     state.elements.revealCommandBtn.addEventListener('click', toggleCommandReveal);
+    state.elements.copyDoctorReportBtn.addEventListener('click', () =>
+      handleDoctorAction('copy-report').catch(showError)
+    );
+    state.elements.revealProjectDirBtn.addEventListener('click', () =>
+      handleDoctorAction('reveal-directory').catch(showError)
+    );
+    state.elements.doctorChecks.addEventListener('click', (event) => {
+      const button = event.target.closest('[data-doctor-action]');
+      if (!button || button.disabled) return;
+      handleDoctorAction(button.dataset.doctorAction).catch(showError);
+    });
     state.elements.portInput.addEventListener('input', handlePortInput);
 
     ['nameInput', 'commandInput', 'urlInput', 'autostartInput', 'openOnReadyInput'].forEach(
@@ -768,6 +987,12 @@
       'copyLogsBtn',
       'clearLogsBtn',
       'commandReveal',
+      'doctorPanel',
+      'doctorSummary',
+      'doctorChecks',
+      'doctorTimeline',
+      'copyDoctorReportBtn',
+      'revealProjectDirBtn',
       'statusBadge',
       'pidLabel',
       'readinessLabel',

@@ -21,6 +21,8 @@ terminal juggling.
   projects ready when they respond.
 - **Inline validation** — see missing directories, unsafe commands, invalid URLs,
   and busy ports before saving or starting.
+- **Project Doctor** — see preflight checks, start timeline, readiness diagnosis,
+  safe fixes, and a copyable report when a project needs attention.
 - **One-click open** — launch a ready local app in your browser.
 - **System tray integration** — minimize to the tray and keep projects running in
   the background.
@@ -67,6 +69,13 @@ npm install
 npm start          # launch the app
 npm run dev        # launch with dev flag
 ```
+
+## Demo Project
+
+This repo includes a dependency-free sample app at
+`examples/sample-project`. Import that folder in LocalWrap to test project
+inspection, start/stop/restart, readiness, logs, Project Doctor, and open-in-
+browser behavior without setting up another repo.
 
 ## Build distributables
 

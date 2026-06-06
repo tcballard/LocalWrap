@@ -21,13 +21,14 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.4.0',
+  version: '2.5.0',
   platform: 'desktop',
   isElectron: true,
 
   listProjects: () => ipcRenderer.invoke('project:list'),
   inspectDirectory: (workingDir) => ipcRenderer.invoke('project:inspectDirectory', workingDir),
   validateProjectDraft: (draft) => ipcRenderer.invoke('project:validateDraft', draft),
+  diagnoseProjectDraft: (draft) => ipcRenderer.invoke('project:diagnoseDraft', draft),
   createProject: (project) => ipcRenderer.invoke('project:create', project),
   updateProject: (projectId, patch) => ipcRenderer.invoke('project:update', projectId, patch),
   deleteProject: (projectId) => ipcRenderer.invoke('project:delete', projectId),
@@ -40,6 +41,10 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   checkProjectPort: (port) => ipcRenderer.invoke('project:checkPort', port),
   clearProjectLogs: (projectId) => ipcRenderer.invoke('project:clearLogs', projectId),
   copyProjectLogs: (projectId) => ipcRenderer.invoke('project:copyLogs', projectId),
+  applyDoctorAction: (projectId, actionId) =>
+    ipcRenderer.invoke('project:applyDoctorAction', projectId, actionId),
+  copyDoctorReport: (projectId) => ipcRenderer.invoke('project:copyDoctorReport', projectId),
+  revealProjectDirectory: (projectId) => ipcRenderer.invoke('project:revealDirectory', projectId),
 
   selectDirectory: () => ipcRenderer.invoke('dir:select'),
   getCurrentDirectory: () => ipcRenderer.invoke('dir:current'),

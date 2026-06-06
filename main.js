@@ -14,6 +14,12 @@ const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const { discoverPackageScripts } = require('./lib/packageScripts');
 const { checkPortAvailable, findAvailablePort } = require('./lib/portUtils');
+const {
+  ACTIONS: DOCTOR_ACTIONS,
+  buildDoctorReport,
+  diagnoseProjectDraft: runProjectDoctor,
+  getDoctorActionPatch,
+} = require('./lib/projectDoctor');
 const { inspectProjectDirectory } = require('./lib/projectInspection');
 const { ACTIVE_STATUSES, ProjectLifecycle } = require('./lib/projectLifecycle');
 const { ProjectStore } = require('./lib/projectStore');
@@ -44,6 +50,12 @@ function serializeProject(project) {
   };
 }
 
+function serializeRuntime(projectId) {
+  return projectLifecycle
+    ? projectLifecycle.getState(projectId)
+    : { status: 'stopped', logs: [], diagnosis: null };
+}
+
 function serializeProjects() {
   return projectStore.list().map(serializeProject);
 }
@@ -72,6 +84,13 @@ function openProject(project) {
     throw new Error('Project URL must be local.');
   }
   shell.openExternal(project.url);
+}
+
+function revealProjectDirectory(project) {
+  if (!fs.existsSync(project.cwd) || !fs.statSync(project.cwd).isDirectory()) {
+    throw new Error('Project directory does not exist.');
+  }
+  return shell.openPath(project.cwd);
 }
 
 function createWindow() {
@@ -298,6 +317,34 @@ function assertSafeProjectMutation(projectId, patch = {}) {
   }
 }
 
+async function applyDoctorAction(projectId, actionId) {
+  const project = getProjectOrThrow(projectId);
+
+  if (actionId === DOCTOR_ACTIONS.REVEAL_DIRECTORY) {
+    await revealProjectDirectory(project);
+    return serializeProject(project);
+  }
+
+  if (actionId === DOCTOR_ACTIONS.USE_FREE_PORT) {
+    const port = await findAvailablePort(project.port);
+    const patch = getDoctorActionPatch(project, actionId, { port });
+    assertSafeProjectMutation(projectId, patch);
+    const updated = projectStore.update(projectId, patch);
+    emitProjectListChanged();
+    return serializeProject(updated);
+  }
+
+  if (actionId === DOCTOR_ACTIONS.SYNC_URL_TO_PORT) {
+    const patch = getDoctorActionPatch(project, actionId);
+    assertSafeProjectMutation(projectId, patch);
+    const updated = projectStore.update(projectId, patch);
+    emitProjectListChanged();
+    return serializeProject(updated);
+  }
+
+  throw new Error(`Unknown Project Doctor action: ${actionId}`);
+}
+
 function registerIpcHandlers() {
   ipcMain.handle('project:list', () => serializeProjects());
 
@@ -310,6 +357,13 @@ function registerIpcHandlers() {
   ipcMain.handle('project:validateDraft', (_event, draft) =>
     validateProjectDraft(draft, {
       checkPortAvailable,
+    })
+  );
+
+  ipcMain.handle('project:diagnoseDraft', (_event, draft) =>
+    runProjectDoctor(draft, {
+      checkPortAvailable,
+      findAvailablePort,
     })
   );
 
@@ -388,6 +442,27 @@ function registerIpcHandlers() {
     };
   });
 
+  ipcMain.handle('project:applyDoctorAction', (_event, projectId, actionId) =>
+    applyDoctorAction(projectId, actionId)
+  );
+
+  ipcMain.handle('project:copyDoctorReport', (_event, projectId) => {
+    const project = getProjectOrThrow(projectId);
+    const runtime = serializeRuntime(projectId);
+    const text = buildDoctorReport(project, runtime);
+    clipboard.writeText(text);
+    return {
+      copied: true,
+      lines: text.split('\n').length - 1,
+    };
+  });
+
+  ipcMain.handle('project:revealDirectory', async (_event, projectId) => {
+    const project = getProjectOrThrow(projectId);
+    await revealProjectDirectory(project);
+    return true;
+  });
+
   ipcMain.handle('project:discoverScripts', (_event, cwd) => discoverPackageScripts(cwd));
 
   ipcMain.handle('dir:select', async () => {
@@ -420,7 +495,7 @@ async function startAutostartProjects() {
 app.whenReady().then(async () => {
   try {
     projectStore = createProjectStore();
-    projectLifecycle = new ProjectLifecycle({ openProject });
+    projectLifecycle = new ProjectLifecycle({ openProject, checkPortAvailable, findAvailablePort });
     projectLifecycle.on('event', (event) => {
       sendToRenderer('project:event', event);
       if (event.type === 'state') {

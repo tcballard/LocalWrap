@@ -36,12 +36,13 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('2.4.0');
+    expect(api.version).toBe('2.5.0');
 
     for (const method of [
       'listProjects',
       'inspectDirectory',
       'validateProjectDraft',
+      'diagnoseProjectDraft',
       'createProject',
       'updateProject',
       'deleteProject',
@@ -54,6 +55,9 @@ describe('preload contextBridge API', () => {
       'checkProjectPort',
       'clearProjectLogs',
       'copyProjectLogs',
+      'applyDoctorAction',
+      'copyDoctorReport',
+      'revealProjectDirectory',
       'selectDirectory',
       'getCurrentDirectory',
       'onProjectEvent',
@@ -74,6 +78,9 @@ describe('preload contextBridge API', () => {
 
     exposed.api.validateProjectDraft({ name: 'Demo' });
     expect(mockInvoke).toHaveBeenLastCalledWith('project:validateDraft', { name: 'Demo' });
+
+    exposed.api.diagnoseProjectDraft({ name: 'Demo' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:diagnoseDraft', { name: 'Demo' });
 
     exposed.api.createProject({ name: 'Demo' });
     expect(mockInvoke).toHaveBeenLastCalledWith('project:create', { name: 'Demo' });
@@ -110,6 +117,19 @@ describe('preload contextBridge API', () => {
 
     exposed.api.copyProjectLogs('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:copyLogs', 'p1');
+
+    exposed.api.applyDoctorAction('p1', 'sync-url-to-port');
+    expect(mockInvoke).toHaveBeenLastCalledWith(
+      'project:applyDoctorAction',
+      'p1',
+      'sync-url-to-port'
+    );
+
+    exposed.api.copyDoctorReport('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:copyDoctorReport', 'p1');
+
+    exposed.api.revealProjectDirectory('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:revealDirectory', 'p1');
   });
 
   test('subscriptions forward payloads and return unsubscribe functions', () => {

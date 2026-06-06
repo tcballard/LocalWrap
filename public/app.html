@@ -388,8 +388,109 @@
 
       .runtime {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto minmax(0, 1fr);
         min-height: 0;
+      }
+
+      .doctor {
+        margin: 10px 10px 0;
+        border: 1px solid #9a9a9a;
+        background: #f7f7f7;
+        box-shadow:
+          1px 1px 0 #fff inset,
+          -1px -1px 0 #d2d2d2 inset;
+      }
+
+      .doctor-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 7px 8px;
+        border-bottom: 1px solid #c5c5c5;
+      }
+
+      .doctor-title {
+        color: #003c74;
+        font-weight: 600;
+      }
+
+      .doctor-summary {
+        margin-left: 8px;
+        color: #333;
+      }
+
+      .doctor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .doctor-checks {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1px;
+        padding: 6px;
+      }
+
+      .doctor-row {
+        display: grid;
+        grid-template-columns: 34px 92px minmax(0, 1fr) auto;
+        gap: 6px;
+        align-items: center;
+        min-height: 27px;
+        padding: 3px 4px;
+        border: 1px solid transparent;
+        background: #fff;
+      }
+
+      .doctor-row.warn {
+        background: #fff9df;
+      }
+
+      .doctor-row.fail {
+        background: #fff0f0;
+      }
+
+      .doctor-row.running {
+        background: #eef5ff;
+      }
+
+      .doctor-state {
+        color: #003c74;
+        font-weight: 700;
+        text-align: center;
+      }
+
+      .doctor-row.warn .doctor-state {
+        color: #755900;
+      }
+
+      .doctor-row.fail .doctor-state {
+        color: #a22222;
+      }
+
+      .doctor-label {
+        font-weight: 600;
+      }
+
+      .doctor-message {
+        overflow: hidden;
+        color: #444;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .doctor-row .btn {
+        min-width: 82px;
+      }
+
+      .doctor-timeline {
+        min-height: 22px;
+        padding: 4px 8px 7px;
+        color: #555;
+        font-size: 11px;
       }
 
       .runtime-header {
@@ -572,6 +673,10 @@
         .span-2 {
           grid-column: span 3;
         }
+
+        .doctor-checks {
+          grid-template-columns: 1fr;
+        }
       }
     </style>
   </head>
@@ -579,7 +684,7 @@
     <div class="window">
       <div class="titlebar">
         <div class="titlebar-title">LocalWrap</div>
-        <div class="titlebar-meta" id="versionLabel">v2.4</div>
+        <div class="titlebar-meta" id="versionLabel">v2.5</div>
       </div>
 
       <div class="toolbar">
@@ -710,6 +815,25 @@
             </div>
 
             <div class="runtime">
+              <div class="doctor" id="doctorPanel">
+                <div class="doctor-header">
+                  <div>
+                    <span class="doctor-title">Project Doctor</span>
+                    <span class="doctor-summary" id="doctorSummary">Not checked yet.</span>
+                  </div>
+                  <div class="doctor-actions">
+                    <button class="btn" id="copyDoctorReportBtn">
+                      <span class="btn-icon">□</span>Copy Report
+                    </button>
+                    <button class="btn" id="revealProjectDirBtn">
+                      <span class="btn-icon">▣</span>Reveal Folder
+                    </button>
+                  </div>
+                </div>
+                <div class="doctor-checks" id="doctorChecks"></div>
+                <div class="doctor-timeline" id="doctorTimeline">No checks yet.</div>
+              </div>
+
               <div class="runtime-header">
                 <div class="runtime-meta">
                   <span class="runtime-title">Output</span>

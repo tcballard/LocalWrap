@@ -19,6 +19,7 @@ describe('renderer view-model helpers', () => {
       pid: null,
       logs: [],
       readinessMessage: null,
+      diagnosis: null,
     });
   });
 
@@ -38,10 +39,30 @@ describe('renderer view-model helpers', () => {
     expect(renderer.isProjectActive(next[1])).toBe(true);
   });
 
-  test('labels v2.4 runtime states clearly', () => {
+  test('labels v2.5 runtime states clearly', () => {
     expect(renderer.statusLabel('running-unresponsive')).toBe('Running, no response');
     expect(renderer.statusLabel('failed')).toBe('Failed');
     expect(renderer.isProjectActive({ runtime: { status: 'running' } })).toBe(true);
     expect(renderer.isProjectActive({ runtime: { status: 'running-unresponsive' } })).toBe(true);
+  });
+
+  test('preserves runtime diagnosis in project events', () => {
+    const next = renderer.mergeProjectEvent(
+      [renderer.normalizeProjectForView({ id: 'a', name: 'A' })],
+      {
+        projectId: 'a',
+        state: {
+          status: 'starting',
+          diagnosis: {
+            status: 'waiting',
+            summary: 'Waiting for URL.',
+            checks: [],
+            timeline: [{ message: 'Waiting for URL.' }],
+          },
+        },
+      }
+    );
+
+    expect(next[0].runtime.diagnosis.summary).toBe('Waiting for URL.');
   });
 });

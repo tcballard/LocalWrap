@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-06-06
+
+### Added
+
+- Project Doctor panel above logs with compact checks for directory, command,
+  dependencies, port, URL, process start, and readiness.
+- Non-persisted diagnosis timeline and Doctor report copying for saved projects.
+- Safe Doctor actions for finding a free port, syncing URL to port, revealing
+  the project folder, and revealing the launch command.
+- Dependency-free sample project under `examples/sample-project` for demos and
+  manual LocalWrap smoke tests.
+
+### Changed
+
+- Project start now runs Doctor preflight first; validation errors block start,
+  while warnings remain advisory.
+- Runtime state now carries diagnosis details for ready, failed,
+  running-but-unresponsive, stopped, and exited processes.
+
 ## [2.4.0] - 2026-06-06
 
 ### Added
