@@ -1,6 +1,13 @@
 (function () {
-  const ACTIVE_STATUSES = new Set(['starting', 'running', 'ready', 'stopping']);
+  const ACTIVE_STATUSES = new Set([
+    'starting',
+    'running',
+    'ready',
+    'running-unresponsive',
+    'stopping',
+  ]);
   const AUTO_URL_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/;
+  const FIELD_NAMES = ['name', 'cwd', 'command', 'port', 'url'];
 
   const state = {
     api: null,
@@ -8,6 +15,11 @@
     selectedId: null,
     draft: null,
     scripts: [],
+    inspectionWarnings: [],
+    validation: null,
+    validationSeq: 0,
+    validationTimer: null,
+    commandVisible: false,
     elements: {},
   };
 
@@ -21,15 +33,15 @@
   }
 
   function createDefaultDraft(overrides = {}) {
-    const port = Number(overrides.port || 3000);
+    const port = Number(overrides.port || overrides.suggestedPort || 3000);
     return {
       id: null,
       isDraft: true,
       name: overrides.name || '',
       cwd: overrides.cwd || '',
-      command: overrides.command || 'npm run dev',
+      command: overrides.command || overrides.recommendedCommand || 'npm run dev',
       port,
-      url: overrides.url || getAutoUrl(port),
+      url: overrides.url || overrides.suggestedUrl || getAutoUrl(port),
       autostart: Boolean(overrides.autostart),
       openOnReady: overrides.openOnReady !== false,
       runtime: {
@@ -48,6 +60,10 @@
         pid: project.runtime?.pid || null,
         logs: project.runtime?.logs || [],
         error: project.runtime?.error || null,
+        readinessMessage: project.runtime?.readinessMessage || null,
+        lastExitCode: project.runtime?.lastExitCode ?? project.runtime?.exitCode ?? null,
+        lastStartedAt: project.runtime?.lastStartedAt || project.runtime?.startedAt || null,
+        lastStoppedAt: project.runtime?.lastStoppedAt || project.runtime?.stoppedAt || null,
       },
     };
   }
@@ -74,9 +90,11 @@
       starting: 'Starting',
       running: 'Running',
       ready: 'Ready',
+      'running-unresponsive': 'Running, no response',
       stopping: 'Stopping',
       stopped: 'Stopped',
-      error: 'Error',
+      failed: 'Failed',
+      error: 'Failed',
     };
     return labels[status] || 'Stopped';
   }
@@ -87,6 +105,35 @@
 
     statusBar.textContent = message;
     statusBar.style.color = type === 'error' ? '#a22222' : '';
+  }
+
+  function setStatusRight(message) {
+    const statusRight = state.elements.statusRight;
+    if (!statusRight) return;
+
+    statusRight.textContent = message;
+  }
+
+  function updateStatusRight() {
+    const project = selectedProject();
+    if (!project) {
+      setStatusRight('No project selected');
+      return;
+    }
+
+    if (project.isDraft) {
+      const draft = readFormProject();
+      setStatusRight(`${draft.name || 'New project'} | Draft | Port ${draft.port || '-'}`);
+      return;
+    }
+
+    const formProject = readFormProject();
+    const dirtySuffix = isFormDirty() ? ' | Unsaved changes' : '';
+    setStatusRight(
+      `${project.name} | ${statusLabel(project.runtime?.status)} | Port ${
+        formProject.port || project.port || '-'
+      }${dirtySuffix}`
+    );
   }
 
   function showError(error) {
@@ -100,15 +147,69 @@
     return state.projects.find((project) => project.id === state.selectedId) || null;
   }
 
+  function selectedSavedProject() {
+    return state.projects.find((project) => project.id === state.selectedId) || null;
+  }
+
+  function readFormProject() {
+    const project = selectedProject() || createDefaultDraft();
+    return {
+      id: project.id,
+      isDraft: Boolean(project.isDraft),
+      name:
+        state.elements.nameInput.value.trim() ||
+        pathBasename(state.elements.cwdInput.value) ||
+        'Untitled Project',
+      cwd: state.elements.cwdInput.value,
+      command: state.elements.commandInput.value.trim(),
+      port: Number(state.elements.portInput.value),
+      url: state.elements.urlInput.value.trim(),
+      autostart: state.elements.autostartInput.checked,
+      openOnReady: state.elements.openOnReadyInput.checked,
+    };
+  }
+
+  function projectFields(project) {
+    if (!project) return null;
+    return {
+      name: project.name || '',
+      cwd: project.cwd || '',
+      command: project.command || '',
+      port: Number(project.port || 3000),
+      url: project.url || getAutoUrl(project.port),
+      autostart: Boolean(project.autostart),
+      openOnReady: Boolean(project.openOnReady),
+    };
+  }
+
+  function isFormDirty() {
+    if (state.draft) {
+      return true;
+    }
+
+    const saved = selectedSavedProject();
+    if (!saved) {
+      return false;
+    }
+
+    const current = projectFields(readFormProject());
+    const original = projectFields(saved);
+    return Object.keys(original).some((key) => current[key] !== original[key]);
+  }
+
   function setSelected(projectId) {
     state.selectedId = projectId;
     state.draft = null;
     state.scripts = [];
+    state.inspectionWarnings = [];
+    state.validation = null;
+    state.commandVisible = false;
     const project = selectedProject();
+    render();
     if (project?.cwd) {
       discoverScripts(project.cwd);
     }
-    render();
+    scheduleValidation(0);
   }
 
   async function loadProjects(projects) {
@@ -126,11 +227,13 @@
     }
 
     render();
+    scheduleValidation(0);
   }
 
   function render() {
     renderProjectList();
     renderDetail();
+    updateStatusRight();
   }
 
   function renderProjectList() {
@@ -140,7 +243,7 @@
     if (state.projects.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'project-subtitle';
-      empty.textContent = 'No saved projects';
+      empty.textContent = 'Use Add Project to import a folder';
       list.appendChild(empty);
       return;
     }
@@ -178,9 +281,12 @@
     state.elements.emptyState.classList.toggle('visible', !hasProject);
     state.elements.projectDetail.hidden = !hasProject;
     state.elements.saveProjectBtn.disabled = !hasProject;
-    state.elements.deleteProjectBtn.disabled = !hasProject || project.isDraft;
+    state.elements.deleteProjectBtn.disabled = !hasProject || project?.isDraft;
 
     if (!hasProject) {
+      clearFieldMessages();
+      setDraftNotice('');
+      updateActionState();
       return;
     }
 
@@ -194,30 +300,29 @@
 
     renderScripts();
     renderRuntime(project);
+    applyValidationMessages();
+    updateCommandReveal();
+    updateActionState();
   }
 
   function renderRuntime(project) {
     const runtime = project.runtime || { status: 'stopped', logs: [] };
-    const active = isProjectActive(project);
-    const saved = !project.isDraft;
+    const logs = runtime.logs && runtime.logs.length > 0 ? runtime.logs : ['No output yet.'];
 
     state.elements.statusBadge.className = `badge ${runtime.status || 'stopped'}`;
     state.elements.statusBadge.textContent = statusLabel(runtime.status);
     state.elements.pidLabel.textContent = `PID: ${runtime.pid || '-'}`;
+    state.elements.readinessLabel.textContent = runtime.readinessMessage || '';
     state.elements.urlLabel.textContent = project.url || getAutoUrl(project.port);
-    state.elements.startProjectBtn.disabled = !saved || active;
-    state.elements.stopProjectBtn.disabled = !saved || !active || runtime.status === 'stopping';
-    state.elements.restartProjectBtn.disabled = !saved;
-    state.elements.openProjectBtn.disabled = !saved || !project.url;
 
     state.elements.terminal.textContent = '';
-    const logs = runtime.logs && runtime.logs.length > 0 ? runtime.logs : ['No output yet.'];
     logs.forEach((line) => {
       const row = document.createElement('div');
       row.textContent = line;
       state.elements.terminal.appendChild(row);
     });
     state.elements.terminal.scrollTop = state.elements.terminal.scrollHeight;
+    updateActionState();
   }
 
   function renderScripts() {
@@ -242,12 +347,119 @@
     state.scripts.forEach((script) => {
       const option = document.createElement('option');
       option.value = script.command;
-      option.textContent = script.name;
+      option.textContent = script.command ? `${script.name} (${script.command})` : script.name;
       select.appendChild(option);
     });
 
     select.disabled = false;
     select.value = state.scripts.some((script) => script.command === command) ? command : '';
+  }
+
+  function findMessage(messages, field) {
+    return messages.find((message) => message.field === field);
+  }
+
+  function inspectionWarningFor(field) {
+    return state.inspectionWarnings.find((warning) => warning.field === field);
+  }
+
+  function clearFieldMessages() {
+    FIELD_NAMES.forEach((field) => {
+      const fieldEl = state.elements[`${field}Field`];
+      const messageEl = state.elements[`${field}Message`];
+      if (!fieldEl || !messageEl) return;
+
+      fieldEl.classList.remove('invalid', 'warning');
+      messageEl.textContent = '';
+    });
+  }
+
+  function setDraftNotice(message, type = 'warning') {
+    const notice = state.elements.draftNotice;
+    if (!notice) return;
+
+    notice.textContent = message || '';
+    notice.classList.toggle('visible', Boolean(message));
+    notice.classList.toggle('error', type === 'error');
+    notice.classList.toggle('info', type === 'info');
+  }
+
+  function updateDraftNotice() {
+    const project = selectedProject();
+    if (!project) {
+      setDraftNotice('');
+      return;
+    }
+
+    const validation = state.validation || { errors: [], warnings: [] };
+    if (validation.errors.length > 0) {
+      setDraftNotice('Fix the highlighted fields before saving.', 'error');
+      return;
+    }
+
+    const warning = validation.warnings[0] || state.inspectionWarnings[0];
+    if (warning) {
+      setDraftNotice(warning.message);
+      return;
+    }
+
+    if (project.isDraft) {
+      setDraftNotice('Defaults loaded. Save this project when it looks right.', 'info');
+      return;
+    }
+
+    if (isFormDirty()) {
+      setDraftNotice('Unsaved changes. Save before starting or restarting.');
+      return;
+    }
+
+    setDraftNotice('');
+  }
+
+  function applyValidationMessages() {
+    clearFieldMessages();
+
+    const validation = state.validation || { errors: [], warnings: [] };
+    FIELD_NAMES.forEach((field) => {
+      const fieldEl = state.elements[`${field}Field`];
+      const messageEl = state.elements[`${field}Message`];
+      if (!fieldEl || !messageEl) return;
+
+      const error = findMessage(validation.errors, field);
+      const warning = findMessage(validation.warnings, field) || inspectionWarningFor(field);
+
+      if (error) {
+        fieldEl.classList.add('invalid');
+        messageEl.textContent = error.message;
+      } else if (warning) {
+        fieldEl.classList.add('warning');
+        messageEl.textContent = warning.message;
+      }
+    });
+    updateDraftNotice();
+  }
+
+  function updateActionState() {
+    const project = selectedProject();
+    const saved = Boolean(project && !project.isDraft);
+    const active = isProjectActive(project);
+    const validationKnown = Boolean(state.validation);
+    const valid = validationKnown && state.validation.valid;
+    const dirty = isFormDirty();
+    const ready = project?.runtime?.status === 'ready';
+
+    state.elements.saveProjectBtn.disabled = !project || !valid;
+    state.elements.deleteProjectBtn.disabled = !saved;
+    state.elements.startProjectBtn.disabled = !saved || !valid || dirty || active;
+    state.elements.stopProjectBtn.disabled =
+      !saved || !active || project.runtime.status === 'stopping';
+    state.elements.restartProjectBtn.disabled =
+      !saved || !valid || dirty || project.runtime.status === 'stopping';
+    state.elements.openProjectBtn.disabled = !saved || !ready;
+    state.elements.copyLogsBtn.disabled = !saved;
+    state.elements.clearLogsBtn.disabled = !saved;
+    state.elements.revealCommandBtn.disabled = !project;
+    updateStatusRight();
   }
 
   async function discoverScripts(cwd) {
@@ -259,18 +471,7 @@
 
     try {
       state.scripts = await state.api.discoverScripts(cwd);
-      const project = selectedProject();
-      const firstScript = state.scripts[0];
-      if (
-        project?.isDraft &&
-        firstScript &&
-        (!project.command || project.command === 'npm run dev')
-      ) {
-        project.command = firstScript.command;
-        renderDetail();
-      } else {
-        renderScripts();
-      }
+      renderScripts();
     } catch (error) {
       state.scripts = [];
       renderScripts();
@@ -278,25 +479,102 @@
     }
   }
 
-  function readFormProject() {
-    const project = selectedProject() || createDefaultDraft();
-    return {
-      name:
-        state.elements.nameInput.value.trim() ||
-        pathBasename(state.elements.cwdInput.value) ||
-        'Untitled Project',
-      cwd: state.elements.cwdInput.value,
-      command: state.elements.commandInput.value.trim(),
-      port: Number(state.elements.portInput.value),
-      url: state.elements.urlInput.value.trim(),
-      autostart: state.elements.autostartInput.checked,
-      openOnReady: state.elements.openOnReadyInput.checked,
-      isDraft: project.isDraft,
-      id: project.id,
-    };
+  function scheduleValidation(delay = 200) {
+    clearTimeout(state.validationTimer);
+    state.validationTimer = setTimeout(() => {
+      validateCurrentDraft({ silent: true }).catch(showError);
+    }, delay);
+  }
+
+  async function validateCurrentDraft({ silent = false } = {}) {
+    const project = selectedProject();
+    if (!project) {
+      state.validation = null;
+      applyValidationMessages();
+      updateActionState();
+      return { valid: false, errors: [], warnings: [] };
+    }
+
+    const seq = (state.validationSeq += 1);
+    const result = await state.api.validateProjectDraft(readFormProject());
+    if (seq !== state.validationSeq) {
+      return result;
+    }
+
+    state.validation = result;
+    applyValidationMessages();
+    updateActionState();
+
+    if (!silent && !result.valid) {
+      setStatus('Fix project details before continuing.', 'error');
+    }
+
+    return result;
+  }
+
+  function writeProfileToForm(profile) {
+    state.elements.nameInput.value = profile.name || pathBasename(profile.cwd);
+    state.elements.cwdInput.value = profile.cwd || '';
+    state.elements.commandInput.value = profile.recommendedCommand || 'npm run dev';
+    state.elements.portInput.value = profile.suggestedPort || 3000;
+    state.elements.urlInput.value = profile.suggestedUrl || getAutoUrl(profile.suggestedPort);
+    state.scripts = profile.scripts || [];
+    state.inspectionWarnings = profile.warnings || [];
+    renderScripts();
+  }
+
+  async function importProjectFromDirectory() {
+    const cwd = await state.api.selectDirectory();
+    if (!cwd) return;
+
+    const profile = await state.api.inspectDirectory(cwd);
+    state.draft = createDefaultDraft(profile);
+    state.selectedId = null;
+    state.scripts = profile.scripts || [];
+    state.inspectionWarnings = profile.warnings || [];
+    state.validation = null;
+    state.commandVisible = false;
+    render();
+    await validateCurrentDraft({ silent: true });
+
+    if (profile.warnings?.length) {
+      setStatus(profile.warnings[0].message);
+    } else {
+      setStatus(`Ready to save ${profile.name}.`);
+    }
+  }
+
+  async function browseDirectory() {
+    const cwd = await state.api.selectDirectory();
+    if (!cwd) return;
+
+    const profile = await state.api.inspectDirectory(cwd);
+    if (state.draft) {
+      state.draft = createDefaultDraft({
+        ...state.draft,
+        ...profile,
+        command: profile.recommendedCommand,
+        port: profile.suggestedPort,
+        url: profile.suggestedUrl,
+      });
+      state.scripts = profile.scripts || [];
+      state.inspectionWarnings = profile.warnings || [];
+      render();
+    } else {
+      writeProfileToForm(profile);
+      applyValidationMessages();
+      updateActionState();
+    }
+
+    await validateCurrentDraft({ silent: true });
   }
 
   async function saveProject() {
+    const validation = await validateCurrentDraft({ silent: false });
+    if (!validation.valid) {
+      return;
+    }
+
     const formProject = readFormProject();
     try {
       let saved;
@@ -308,8 +586,9 @@
 
       state.draft = null;
       state.selectedId = saved.id;
+      state.inspectionWarnings = [];
       await loadProjects();
-      setStatus(`Saved ${saved.name}`);
+      setStatus(`Saved ${saved.name}.`);
     } catch (error) {
       showError(error);
     }
@@ -323,8 +602,9 @@
     try {
       await state.api.deleteProject(project.id);
       state.selectedId = null;
+      state.validation = null;
       await loadProjects();
-      setStatus(`Deleted ${project.name}`);
+      setStatus(`Deleted ${project.name}.`);
     } catch (error) {
       showError(error);
     }
@@ -333,6 +613,18 @@
   async function runProjectAction(actionName) {
     const project = selectedProject();
     if (!project || project.isDraft) return;
+
+    const validation = await validateCurrentDraft({ silent: true });
+    if (!validation.valid) {
+      setStatus('Fix project details before starting.', 'error');
+      return;
+    }
+
+    if (isFormDirty()) {
+      setStatus('Save changes before starting.', 'error');
+      return;
+    }
+
     const labels = {
       startProject: 'Started',
       stopProject: 'Stopping',
@@ -342,54 +634,52 @@
 
     try {
       await state.api[actionName](project.id);
-      setStatus(`${labels[actionName]} ${project.name}`);
+      setStatus(`${labels[actionName]} ${project.name}.`);
     } catch (error) {
       showError(error);
     }
   }
 
-  async function browseDirectory() {
-    const cwd = await state.api.selectDirectory();
-    if (!cwd) return;
+  async function clearLogs() {
+    const project = selectedProject();
+    if (!project || project.isDraft) return;
 
-    const project = selectedProject() || createDefaultDraft();
-    if (project.isDraft) {
-      project.cwd = cwd;
-      if (!project.name) {
-        project.name = pathBasename(cwd);
-      }
-      state.draft = project;
-    } else {
-      state.elements.cwdInput.value = cwd;
-      if (!state.elements.nameInput.value) {
-        state.elements.nameInput.value = pathBasename(cwd);
-      }
-    }
-
-    state.elements.cwdInput.value = cwd;
-    await discoverScripts(cwd);
-    if (project.isDraft) {
-      renderDetail();
+    try {
+      await state.api.clearProjectLogs(project.id);
+      setStatus(`Cleared logs for ${project.name}.`);
+    } catch (error) {
+      showError(error);
     }
   }
 
-  function newProject() {
-    state.draft = createDefaultDraft();
-    state.selectedId = null;
-    state.scripts = [];
-    render();
+  async function copyLogs() {
+    const project = selectedProject();
+    if (!project || project.isDraft) return;
 
-    state.api
-      .suggestPort(3000)
-      .then((port) => {
-        if (!state.draft || state.draft.cwd || state.draft.port !== 3000) {
-          return;
-        }
-        state.draft.port = port;
-        state.draft.url = getAutoUrl(port);
-        renderDetail();
-      })
-      .catch(() => {});
+    try {
+      const result = await state.api.copyProjectLogs(project.id);
+      setStatus(`Copied ${result.copied} log line(s).`);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  function updateCommandReveal() {
+    const project = selectedProject();
+    state.elements.commandReveal.hidden = !state.commandVisible || !project;
+    state.elements.commandReveal.textContent = project ? state.elements.commandInput.value : '';
+  }
+
+  function toggleCommandReveal() {
+    state.commandVisible = !state.commandVisible;
+    updateCommandReveal();
+  }
+
+  function handleFormChange() {
+    updateCommandReveal();
+    scheduleValidation();
+    updateActionState();
+    updateDraftNotice();
   }
 
   function handlePortInput() {
@@ -398,10 +688,16 @@
     if (!urlInput.value || AUTO_URL_RE.test(urlInput.value)) {
       urlInput.value = getAutoUrl(port);
     }
+    handleFormChange();
   }
 
   function wireControls() {
-    state.elements.newProjectBtn.addEventListener('click', newProject);
+    state.elements.addProjectBtn.addEventListener('click', () =>
+      importProjectFromDirectory().catch(showError)
+    );
+    state.elements.emptyAddProjectBtn.addEventListener('click', () =>
+      importProjectFromDirectory().catch(showError)
+    );
     state.elements.saveProjectBtn.addEventListener('click', saveProject);
     state.elements.deleteProjectBtn.addEventListener('click', deleteProject);
     state.elements.refreshBtn.addEventListener('click', () => loadProjects().catch(showError));
@@ -414,10 +710,22 @@
       runProjectAction('restartProject')
     );
     state.elements.openProjectBtn.addEventListener('click', () => runProjectAction('openProject'));
+    state.elements.clearLogsBtn.addEventListener('click', () => clearLogs().catch(showError));
+    state.elements.copyLogsBtn.addEventListener('click', () => copyLogs().catch(showError));
+    state.elements.revealCommandBtn.addEventListener('click', toggleCommandReveal);
     state.elements.portInput.addEventListener('input', handlePortInput);
+
+    ['nameInput', 'commandInput', 'urlInput', 'autostartInput', 'openOnReadyInput'].forEach(
+      (id) => {
+        state.elements[id].addEventListener('input', handleFormChange);
+        state.elements[id].addEventListener('change', handleFormChange);
+      }
+    );
+
     state.elements.scriptSelect.addEventListener('change', () => {
       if (state.elements.scriptSelect.value) {
         state.elements.commandInput.value = state.elements.scriptSelect.value;
+        handleFormChange();
       }
     });
   }
@@ -427,10 +735,22 @@
       'projectList',
       'emptyState',
       'projectDetail',
-      'newProjectBtn',
+      'addProjectBtn',
+      'emptyAddProjectBtn',
+      'draftNotice',
       'saveProjectBtn',
       'deleteProjectBtn',
       'refreshBtn',
+      'nameField',
+      'nameMessage',
+      'cwdField',
+      'cwdMessage',
+      'portField',
+      'portMessage',
+      'commandField',
+      'commandMessage',
+      'urlField',
+      'urlMessage',
       'nameInput',
       'cwdInput',
       'browseDirBtn',
@@ -444,11 +764,17 @@
       'stopProjectBtn',
       'restartProjectBtn',
       'openProjectBtn',
+      'revealCommandBtn',
+      'copyLogsBtn',
+      'clearLogsBtn',
+      'commandReveal',
       'statusBadge',
       'pidLabel',
+      'readinessLabel',
       'urlLabel',
       'terminal',
       'statusBar',
+      'statusRight',
       'versionLabel',
     ].forEach((id) => {
       state.elements[id] = document.getElementById(id);
@@ -486,12 +812,14 @@
   }
 
   const testApi = {
+    ACTIVE_STATUSES,
     createDefaultDraft,
     getAutoUrl,
     isProjectActive,
     mergeProjectEvent,
     normalizeProjectForView,
     pathBasename,
+    projectFields,
     statusLabel,
   };
 

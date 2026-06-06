@@ -57,6 +57,9 @@ jest.mock('electron', () => ({
     showMessageBox: jest.fn(),
     showErrorBox: jest.fn(),
   },
+  clipboard: {
+    writeText: jest.fn(),
+  },
   nativeImage: {
     createFromPath: jest.fn().mockReturnValue({}),
     createEmpty: jest.fn().mockReturnValue({}),

@@ -36,10 +36,12 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('2.3.0');
+    expect(api.version).toBe('2.4.0');
 
     for (const method of [
       'listProjects',
+      'inspectDirectory',
+      'validateProjectDraft',
       'createProject',
       'updateProject',
       'deleteProject',
@@ -49,6 +51,9 @@ describe('preload contextBridge API', () => {
       'openProject',
       'discoverScripts',
       'suggestPort',
+      'checkProjectPort',
+      'clearProjectLogs',
+      'copyProjectLogs',
       'selectDirectory',
       'getCurrentDirectory',
       'onProjectEvent',
@@ -63,6 +68,12 @@ describe('preload contextBridge API', () => {
 
     exposed.api.listProjects();
     expect(mockInvoke).toHaveBeenLastCalledWith('project:list');
+
+    exposed.api.inspectDirectory('/tmp/demo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:inspectDirectory', '/tmp/demo');
+
+    exposed.api.validateProjectDraft({ name: 'Demo' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:validateDraft', { name: 'Demo' });
 
     exposed.api.createProject({ name: 'Demo' });
     expect(mockInvoke).toHaveBeenLastCalledWith('project:create', { name: 'Demo' });
@@ -90,6 +101,15 @@ describe('preload contextBridge API', () => {
 
     exposed.api.suggestPort(3000);
     expect(mockInvoke).toHaveBeenLastCalledWith('project:suggestPort', 3000);
+
+    exposed.api.checkProjectPort(3000);
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:checkPort', 3000);
+
+    exposed.api.clearProjectLogs('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:clearLogs', 'p1');
+
+    exposed.api.copyProjectLogs('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:copyLogs', 'p1');
   });
 
   test('subscriptions forward payloads and return unsubscribe functions', () => {

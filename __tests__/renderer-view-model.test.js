@@ -4,7 +4,7 @@ const renderer = global.LocalWrapRenderer;
 
 describe('renderer view-model helpers', () => {
   test('creates a default unsaved project draft', () => {
-    expect(renderer.createDefaultDraft({ port: 5173 })).toMatchObject({
+    expect(renderer.createDefaultDraft({ suggestedPort: 5173 })).toMatchObject({
       isDraft: true,
       command: 'npm run dev',
       port: 5173,
@@ -18,6 +18,7 @@ describe('renderer view-model helpers', () => {
       status: 'stopped',
       pid: null,
       logs: [],
+      readinessMessage: null,
     });
   });
 
@@ -35,5 +36,12 @@ describe('renderer view-model helpers', () => {
     expect(next[0].runtime.status).toBe('stopped');
     expect(next[1].runtime.status).toBe('ready');
     expect(renderer.isProjectActive(next[1])).toBe(true);
+  });
+
+  test('labels v2.4 runtime states clearly', () => {
+    expect(renderer.statusLabel('running-unresponsive')).toBe('Running, no response');
+    expect(renderer.statusLabel('failed')).toBe('Failed');
+    expect(renderer.isProjectActive({ runtime: { status: 'running' } })).toBe(true);
+    expect(renderer.isProjectActive({ runtime: { status: 'running-unresponsive' } })).toBe(true);
   });
 });

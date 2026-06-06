@@ -7,8 +7,11 @@ This directory contains the test suite for LocalWrap, a secure desktop launcher 
 - **`validation.test.js`** - Tests for local project URL validation.
 - **`port-check.test.js`** - Tests for real port parsing, validation, availability, and selection.
 - **`server-management.test.js`** - Tests for project process lifecycle behavior.
+- **`project-inspection.test.js`** - Tests for first-run directory inspection and launch suggestions.
+- **`project-validation.test.js`** - Tests for structured project draft validation.
 - **`project-store.test.js`** - Tests for persisted project normalization and validation.
 - **`renderer-view-model.test.js`** - Tests for renderer view-model helpers.
+- **`renderer-ui.test.js`** - Tests for key first-run, validation, and log-control UI anchors.
 - **`preload.test.js`** - Tests for the preload IPC surface.
 - **`integration.test.js`** - Tests for script discovery and readiness helpers.
 
@@ -38,6 +41,8 @@ The tests cover:
 
 - Local project URL validation.
 - Port availability and selection.
+- Directory inspection and package script suggestions.
+- Structured draft validation errors and warnings.
 - Project persistence and validation.
 - Project process lifecycle events.
 - Preload IPC exposure.

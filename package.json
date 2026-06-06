@@ -1,6 +1,6 @@
 {
   "name": "localwrap",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Secure desktop launcher for local development projects",
   "main": "main.js",
   "scripts": {

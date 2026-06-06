@@ -45,9 +45,65 @@ describe('ProjectLifecycle', () => {
     const state = lifecycle.getState('project-1');
     expect(state.status).toBe('ready');
     expect(state.pid).toBe(1234);
+    expect(state.readinessMessage).toBe('Project is ready.');
     expect(state.logs).toContain('compiled');
     expect(state.logs).toContain('[ready] http://localhost:3000');
     expect(events.some((event) => event.type === 'output')).toBe(true);
+  });
+
+  test('marks a running project as unresponsive when readiness times out', async () => {
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => createFakeChild()),
+      waitForReady: jest.fn(() => Promise.resolve(false)),
+    });
+
+    await lifecycle.start(createProject());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const state = lifecycle.getState('project-1');
+    expect(state.status).toBe('running-unresponsive');
+    expect(state.readinessMessage).toMatch(/did not respond/);
+    expect(state.logs.join('\n')).toMatch(/running-unresponsive/);
+  });
+
+  test('marks spawn failures as failed', async () => {
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => {
+        throw new Error('spawn failed');
+      }),
+    });
+
+    await expect(lifecycle.start(createProject())).rejects.toThrow(/spawn failed/);
+    expect(lifecycle.getState('project-1')).toMatchObject({
+      status: 'failed',
+      error: 'spawn failed',
+      readinessMessage: 'Project failed to start.',
+    });
+  });
+
+  test('preserves exit metadata and clears logs', async () => {
+    let onExit;
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn((options) => {
+        onExit = options.onExit;
+        return createFakeChild();
+      }),
+      waitForReady: jest.fn(() => new Promise(() => {})),
+      now: () => '2026-06-06T00:00:00.000Z',
+    });
+
+    await lifecycle.start(createProject());
+    lifecycle.appendLog('project-1', 'hello');
+    onExit(1);
+
+    expect(lifecycle.getState('project-1')).toMatchObject({
+      status: 'stopped',
+      lastExitCode: 1,
+      lastStoppedAt: '2026-06-06T00:00:00.000Z',
+    });
+
+    lifecycle.clearLogs('project-1');
+    expect(lifecycle.getState('project-1').logs).toEqual([]);
   });
 
   test('stops a running project by killing the process tree', async () => {

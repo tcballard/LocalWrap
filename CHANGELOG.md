@@ -5,6 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] - 2026-06-06
+
+### Added
+
+- Guided project import: choose a directory first, then LocalWrap inspects
+  package scripts and suggests a name, command, port, and local URL.
+- Inline project draft validation with field-level errors and warnings for
+  missing directories, invalid commands, invalid URLs, port mismatches, and busy
+  ports.
+- Clearer runtime states for ready, failed, and running-but-unresponsive
+  projects.
+- Log controls for clearing, copying, and revealing the command attached to the
+  selected project.
+- More useful tray actions, including stop-all and per-running-project controls.
+
+### Changed
+
+- Reworked the first-run empty state around a single Add Project action.
+- `Start` and `Save` now stay disabled until project details are valid; `Open` is
+  strongest only when a project is ready.
+
 ## [2.3.0] - 2026-06-05
 
 ### Added

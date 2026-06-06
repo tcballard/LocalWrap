@@ -1,11 +1,23 @@
-const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  nativeImage,
+  shell,
+  dialog,
+  ipcMain,
+  clipboard,
+} = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
 const { discoverPackageScripts } = require('./lib/packageScripts');
-const { findAvailablePort } = require('./lib/portUtils');
-const { ProjectLifecycle } = require('./lib/projectLifecycle');
+const { checkPortAvailable, findAvailablePort } = require('./lib/portUtils');
+const { inspectProjectDirectory } = require('./lib/projectInspection');
+const { ACTIVE_STATUSES, ProjectLifecycle } = require('./lib/projectLifecycle');
 const { ProjectStore } = require('./lib/projectStore');
+const { validateProjectDraft } = require('./lib/projectValidation');
 const { validateLocalProjectURL } = require('./lib/urlValidation');
 
 let mainWindow;
@@ -147,9 +159,7 @@ function checkForUpdates({ silent = false } = {}) {
 
 function createTrayMenuTemplate() {
   const projects = projectStore ? serializeProjects() : [];
-  const activeProjects = projects.filter((project) =>
-    ['starting', 'running', 'ready', 'stopping'].includes(project.runtime.status)
-  );
+  const activeProjects = projects.filter((project) => ACTIVE_STATUSES.has(project.runtime.status));
   const readyProjects = projects.filter((project) => project.runtime.status === 'ready');
 
   return [
@@ -169,10 +179,44 @@ function createTrayMenuTemplate() {
         readyProjects.forEach(openProject);
       },
     },
+    {
+      label: 'Stop All Running Projects',
+      enabled: activeProjects.length > 0,
+      click: () => {
+        projectLifecycle
+          .stopAll()
+          .then(emitProjectListChanged)
+          .catch((error) => console.error('Failed to stop projects:', error));
+      },
+    },
     { type: 'separator' },
     {
       label: `${activeProjects.length} running / ${projects.length} saved project(s)`,
       enabled: false,
+    },
+    {
+      label: 'Running Projects',
+      enabled: activeProjects.length > 0,
+      submenu: activeProjects.map((project) => ({
+        label: project.name,
+        submenu: [
+          {
+            label: 'Open',
+            enabled: project.runtime.status === 'ready',
+            click: () => openProject(project),
+          },
+          {
+            label: 'Stop',
+            enabled: project.runtime.status !== 'stopping',
+            click: () => {
+              projectLifecycle
+                .stop(project.id)
+                .then(emitProjectListChanged)
+                .catch((error) => console.error(`Failed to stop ${project.name}:`, error));
+            },
+          },
+        ],
+      })),
     },
     { type: 'separator' },
     {
@@ -257,6 +301,18 @@ function assertSafeProjectMutation(projectId, patch = {}) {
 function registerIpcHandlers() {
   ipcMain.handle('project:list', () => serializeProjects());
 
+  ipcMain.handle('project:inspectDirectory', (_event, cwd) =>
+    inspectProjectDirectory(cwd, {
+      findAvailablePort,
+    })
+  );
+
+  ipcMain.handle('project:validateDraft', (_event, draft) =>
+    validateProjectDraft(draft, {
+      checkPortAvailable,
+    })
+  );
+
   ipcMain.handle('project:create', async (_event, payload = {}) => {
     const project = projectStore.create(payload);
     emitProjectListChanged();
@@ -271,6 +327,11 @@ function registerIpcHandlers() {
   ipcMain.handle('project:suggestPort', (_event, preferredPort = 3000) =>
     findAvailablePort(preferredPort)
   );
+
+  ipcMain.handle('project:checkPort', async (_event, port) => ({
+    port,
+    available: await checkPortAvailable(port),
+  }));
 
   ipcMain.handle('project:update', (_event, projectId, patch = {}) => {
     assertSafeProjectMutation(projectId, patch);
@@ -310,6 +371,21 @@ function registerIpcHandlers() {
     const project = getProjectOrThrow(projectId);
     openProject(project);
     return true;
+  });
+
+  ipcMain.handle('project:clearLogs', (_event, projectId) => {
+    const state = projectLifecycle.clearLogs(projectId);
+    emitProjectListChanged();
+    return state;
+  });
+
+  ipcMain.handle('project:copyLogs', (_event, projectId) => {
+    const state = projectLifecycle.getState(projectId);
+    const text = state.logs.join('\n');
+    clipboard.writeText(text);
+    return {
+      copied: state.logs.length,
+    };
   });
 
   ipcMain.handle('project:discoverScripts', (_event, cwd) => discoverPackageScripts(cwd));

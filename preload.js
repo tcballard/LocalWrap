@@ -21,11 +21,13 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.3.0',
+  version: '2.4.0',
   platform: 'desktop',
   isElectron: true,
 
   listProjects: () => ipcRenderer.invoke('project:list'),
+  inspectDirectory: (workingDir) => ipcRenderer.invoke('project:inspectDirectory', workingDir),
+  validateProjectDraft: (draft) => ipcRenderer.invoke('project:validateDraft', draft),
   createProject: (project) => ipcRenderer.invoke('project:create', project),
   updateProject: (projectId, patch) => ipcRenderer.invoke('project:update', projectId, patch),
   deleteProject: (projectId) => ipcRenderer.invoke('project:delete', projectId),
@@ -35,6 +37,9 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   openProject: (projectId) => ipcRenderer.invoke('project:open', projectId),
   discoverScripts: (workingDir) => ipcRenderer.invoke('project:discoverScripts', workingDir),
   suggestPort: (preferredPort) => ipcRenderer.invoke('project:suggestPort', preferredPort),
+  checkProjectPort: (port) => ipcRenderer.invoke('project:checkPort', port),
+  clearProjectLogs: (projectId) => ipcRenderer.invoke('project:clearLogs', projectId),
+  copyProjectLogs: (projectId) => ipcRenderer.invoke('project:copyLogs', projectId),
 
   selectDirectory: () => ipcRenderer.invoke('dir:select'),
   getCurrentDirectory: () => ipcRenderer.invoke('dir:current'),

@@ -68,6 +68,16 @@
         background: #ececec;
       }
 
+      .toolbar-spacer {
+        flex: 1;
+      }
+
+      .btn-icon {
+        margin-right: 4px;
+        color: #064a9d;
+        font-weight: 700;
+      }
+
       .layout {
         display: grid;
         grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -131,11 +141,13 @@
       }
 
       .status-dot.running,
-      .status-dot.starting {
+      .status-dot.starting,
+      .status-dot.running-unresponsive {
         background: #d9a600;
       }
 
-      .status-dot.error {
+      .status-dot.error,
+      .status-dot.failed {
         background: #c63434;
       }
 
@@ -168,12 +180,34 @@
         min-height: 0;
       }
 
+      .detail[hidden] {
+        display: none;
+      }
+
       .form {
         display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
-        gap: 8px;
+        gap: 10px;
         padding: 10px;
         border-bottom: 1px solid #8a8a8a;
+      }
+
+      .group-box {
+        display: grid;
+        grid-template-columns: repeat(12, minmax(0, 1fr));
+        grid-column: span 12;
+        gap: 8px;
+        min-width: 0;
+        min-inline-size: 0;
+        padding: 10px 8px 8px;
+        border: 1px solid #9a9a9a;
+        background: #f5f5f5;
+      }
+
+      .group-box legend {
+        padding: 0 5px;
+        color: #003c74;
+        font-weight: 600;
       }
 
       .field {
@@ -195,6 +229,59 @@
         border: 1px inset #f0f0f0;
         padding: 3px 5px;
         background: #fff;
+      }
+
+      .field.invalid input,
+      .field.invalid select {
+        border-color: #a22222;
+        background: #fff4f4;
+      }
+
+      .field.warning input,
+      .field.warning select {
+        border-color: #9a7600;
+        background: #fff9df;
+      }
+
+      .field-message {
+        min-height: 13px;
+        color: #666;
+        font-size: 10px;
+      }
+
+      .field.invalid .field-message {
+        color: #a22222;
+      }
+
+      .field.warning .field-message {
+        color: #755900;
+      }
+
+      .notice {
+        display: none;
+        grid-column: span 12;
+        min-height: 24px;
+        align-items: center;
+        padding: 5px 7px;
+        border: 1px solid #d1b44c;
+        background: #fff7d7;
+        color: #4c3a00;
+      }
+
+      .notice.error {
+        border-color: #b45a5a;
+        background: #fff0f0;
+        color: #7c1515;
+      }
+
+      .notice.info {
+        border-color: #7f9db9;
+        background: #eef5ff;
+        color: #003c74;
+      }
+
+      .notice.visible {
+        display: flex;
       }
 
       .span-2 {
@@ -219,6 +306,10 @@
 
       .span-7 {
         grid-column: span 7;
+      }
+
+      .span-8 {
+        grid-column: span 8;
       }
 
       .span-12 {
@@ -286,6 +377,10 @@
         cursor: default;
       }
 
+      .btn:disabled .btn-icon {
+        color: #777;
+      }
+
       .btn.primary {
         border-color: #4b83bd;
         background: #dfefff;
@@ -311,6 +406,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
+        align-items: center;
         color: #333;
       }
 
@@ -328,14 +424,42 @@
       }
 
       .badge.running,
-      .badge.starting {
+      .badge.starting,
+      .badge.running-unresponsive {
         border-color: #9a7600;
         background: #fff2bf;
       }
 
-      .badge.error {
+      .badge.error,
+      .badge.failed {
         border-color: #a22222;
         background: #ffe2e2;
+      }
+
+      .log-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .runtime-title {
+        color: #003c74;
+        font-weight: 600;
+      }
+
+      .command-reveal {
+        margin: 8px 10px 0;
+        border: 1px inset #f0f0f0;
+        background: #fff;
+        padding: 6px;
+        color: #333;
+        font-family: 'Courier New', Courier, monospace;
+        font-size: 11px;
+        word-break: break-word;
+      }
+
+      .command-reveal[hidden] {
+        display: none;
       }
 
       .terminal {
@@ -358,7 +482,26 @@
         flex: 1;
         align-items: center;
         justify-content: center;
+        flex-direction: column;
+        gap: 10px;
         color: #555;
+      }
+
+      .empty-task {
+        width: min(320px, calc(100% - 32px));
+        border: 1px solid #7f9db9;
+        background: #eef5ff;
+        padding: 14px;
+        box-shadow:
+          1px 1px 0 #fff inset,
+          -1px -1px 0 #c7d9ee inset;
+        text-align: center;
+      }
+
+      .empty-title {
+        margin-bottom: 10px;
+        color: #003c74;
+        font-weight: 600;
       }
 
       .empty.visible {
@@ -366,11 +509,26 @@
       }
 
       .status-bar {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
         min-height: 25px;
         padding: 5px 8px;
         border-top: 1px solid #8a8a8a;
         background: #ececec;
         color: #222;
+      }
+
+      .status-bar span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .status-right {
+        color: #555;
+        font-size: 11px;
       }
 
       @media (max-width: 820px) {
@@ -397,6 +555,12 @@
           grid-template-columns: repeat(6, minmax(0, 1fr));
         }
 
+        .group-box {
+          grid-template-columns: repeat(6, minmax(0, 1fr));
+        }
+
+        .span-12,
+        .span-8,
         .span-7,
         .span-6,
         .span-5,
@@ -415,14 +579,21 @@
     <div class="window">
       <div class="titlebar">
         <div class="titlebar-title">LocalWrap</div>
-        <div class="titlebar-meta" id="versionLabel">v2.3</div>
+        <div class="titlebar-meta" id="versionLabel">v2.4</div>
       </div>
 
       <div class="toolbar">
-        <button class="btn primary" id="newProjectBtn">New</button>
-        <button class="btn" id="saveProjectBtn" disabled>Save</button>
-        <button class="btn" id="deleteProjectBtn" disabled>Delete</button>
-        <button class="btn" id="refreshBtn">Refresh</button>
+        <button class="btn primary" id="addProjectBtn">
+          <span class="btn-icon">+</span>Add Project
+        </button>
+        <button class="btn" id="saveProjectBtn" disabled>
+          <span class="btn-icon">✓</span>Save
+        </button>
+        <button class="btn" id="deleteProjectBtn" disabled>
+          <span class="btn-icon">×</span>Delete
+        </button>
+        <span class="toolbar-spacer"></span>
+        <button class="btn" id="refreshBtn"><span class="btn-icon">↻</span>Refresh</button>
       </div>
 
       <div class="layout">
@@ -432,89 +603,142 @@
         </aside>
 
         <main class="main">
-          <div class="empty visible" id="emptyState">No projects saved.</div>
+          <div class="empty visible" id="emptyState">
+            <div class="empty-task">
+              <div class="empty-title">No projects saved</div>
+              <button class="btn primary" id="emptyAddProjectBtn">
+                <span class="btn-icon">+</span>Add Project
+              </button>
+            </div>
+          </div>
 
           <section class="detail" id="projectDetail" hidden>
             <div class="form">
-              <div class="field span-4">
-                <label for="nameInput">Name</label>
-                <input type="text" id="nameInput" autocomplete="off" />
-              </div>
+              <div class="notice" id="draftNotice"></div>
 
-              <div class="field span-6">
-                <label for="cwdInput">Directory</label>
-                <div class="inline-field">
-                  <div class="field">
-                    <input type="text" id="cwdInput" readonly />
+              <fieldset class="group-box">
+                <legend>Project</legend>
+                <div class="field span-4" id="nameField">
+                  <label for="nameInput">Name</label>
+                  <input type="text" id="nameInput" autocomplete="off" />
+                  <div class="field-message" id="nameMessage"></div>
+                </div>
+
+                <div class="field span-8" id="cwdField">
+                  <label for="cwdInput">Directory</label>
+                  <div class="inline-field">
+                    <div class="field">
+                      <input type="text" id="cwdInput" readonly />
+                    </div>
+                    <button class="btn" id="browseDirBtn">
+                      <span class="btn-icon">▣</span>Browse
+                    </button>
                   </div>
-                  <button class="btn" id="browseDirBtn">Browse</button>
+                  <div class="field-message" id="cwdMessage"></div>
                 </div>
-              </div>
+              </fieldset>
 
-              <div class="field span-2">
-                <label for="portInput">Port</label>
-                <input type="number" id="portInput" min="1000" max="65535" value="3000" />
-              </div>
-
-              <div class="field span-5">
-                <label for="commandInput">Command</label>
-                <input type="text" id="commandInput" autocomplete="off" placeholder="npm run dev" />
-              </div>
-
-              <div class="field span-3">
-                <label for="scriptSelect">Package Script</label>
-                <select id="scriptSelect">
-                  <option value="">None found</option>
-                </select>
-              </div>
-
-              <div class="field span-4">
-                <label for="urlInput">App URL</label>
-                <input
-                  type="text"
-                  id="urlInput"
-                  autocomplete="off"
-                  placeholder="http://localhost:3000"
-                />
-              </div>
-
-              <div class="field span-5">
-                <label>Launch</label>
-                <div class="checks">
-                  <label class="check">
-                    <input type="checkbox" id="autostartInput" />
-                    Autostart
-                  </label>
-                  <label class="check">
-                    <input type="checkbox" id="openOnReadyInput" />
-                    Open when ready
-                  </label>
+              <fieldset class="group-box">
+                <legend>Launch</legend>
+                <div class="field span-5" id="commandField">
+                  <label for="commandInput">Command</label>
+                  <input
+                    type="text"
+                    id="commandInput"
+                    autocomplete="off"
+                    placeholder="npm run dev"
+                  />
+                  <div class="field-message" id="commandMessage"></div>
                 </div>
-              </div>
 
-              <div class="actions span-7">
-                <button class="btn primary" id="startProjectBtn">Start</button>
-                <button class="btn" id="stopProjectBtn">Stop</button>
-                <button class="btn" id="restartProjectBtn">Restart</button>
-                <button class="btn" id="openProjectBtn">Open</button>
-              </div>
+                <div class="field span-3">
+                  <label for="scriptSelect">Package Script</label>
+                  <select id="scriptSelect">
+                    <option value="">None found</option>
+                  </select>
+                </div>
+
+                <div class="field span-2" id="portField">
+                  <label for="portInput">Port</label>
+                  <input type="number" id="portInput" min="1000" max="65535" value="3000" />
+                  <div class="field-message" id="portMessage"></div>
+                </div>
+
+                <div class="field span-4" id="urlField">
+                  <label for="urlInput">App URL</label>
+                  <input
+                    type="text"
+                    id="urlInput"
+                    autocomplete="off"
+                    placeholder="http://localhost:3000"
+                  />
+                  <div class="field-message" id="urlMessage"></div>
+                </div>
+
+                <div class="actions span-8">
+                  <button class="btn primary" id="startProjectBtn">
+                    <span class="btn-icon">▶</span>Start
+                  </button>
+                  <button class="btn" id="stopProjectBtn">
+                    <span class="btn-icon">■</span>Stop
+                  </button>
+                  <button class="btn" id="restartProjectBtn">
+                    <span class="btn-icon">↻</span>Restart
+                  </button>
+                  <button class="btn" id="openProjectBtn">
+                    <span class="btn-icon">↗</span>Open
+                  </button>
+                </div>
+              </fieldset>
+
+              <fieldset class="group-box">
+                <legend>Options</legend>
+                <div class="field span-12">
+                  <label>Startup</label>
+                  <div class="checks">
+                    <label class="check">
+                      <input type="checkbox" id="autostartInput" />
+                      Autostart
+                    </label>
+                    <label class="check">
+                      <input type="checkbox" id="openOnReadyInput" />
+                      Open when ready
+                    </label>
+                  </div>
+                </div>
+              </fieldset>
             </div>
 
             <div class="runtime">
               <div class="runtime-header">
                 <div class="runtime-meta">
+                  <span class="runtime-title">Output</span>
                   <span class="badge" id="statusBadge">Stopped</span>
                   <span id="pidLabel">PID: -</span>
+                  <span id="readinessLabel"></span>
+                </div>
+                <div class="log-actions">
+                  <button class="btn" id="revealCommandBtn">
+                    <span class="btn-icon">›_</span>Command
+                  </button>
+                  <button class="btn" id="copyLogsBtn"><span class="btn-icon">□</span>Copy</button>
+                  <button class="btn" id="clearLogsBtn">
+                    <span class="btn-icon">×</span>Clear
+                  </button>
                 </div>
                 <span id="urlLabel">http://localhost:3000</span>
               </div>
+              <div class="command-reveal" id="commandReveal" hidden></div>
               <div class="terminal" id="terminal" aria-label="Project output"></div>
             </div>
           </section>
         </main>
       </div>
 
-      <div class="status-bar" id="statusBar" aria-live="polite">Ready</div>
+      <div class="status-bar" aria-live="polite">
+        <span id="statusBar">Ready</span>
+        <span class="status-right" id="statusRight">No project selected</span>
+      </div>
     </div>
 
     <script src="app.js"></script>

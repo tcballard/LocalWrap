@@ -13,13 +13,17 @@ terminal juggling.
 
 - **Saved project launcher** — keep project directory, command, port, URL,
   autostart, and open-on-ready preferences in one place.
+- **Guided project import** — pick a repo and LocalWrap suggests the name,
+  command, port, and URL from common package scripts.
 - **Process control** — start/stop/restart dev commands with `PORT` injected and
   bounded live output.
 - **Readiness tracking** — LocalWrap polls local `http`/`https` URLs and marks
   projects ready when they respond.
+- **Inline validation** — see missing directories, unsafe commands, invalid URLs,
+  and busy ports before saving or starting.
 - **One-click open** — launch a ready local app in your browser.
-- **System tray integration** — minimize to the tray and keep servers running in the
-  background.
+- **System tray integration** — minimize to the tray and keep projects running in
+  the background.
 - **Secure by default** — privileged actions are IPC-only, commands are
   allowlisted, local URLs are validated, and Electron runs with context isolation
   and no Node integration in the renderer.
