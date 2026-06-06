@@ -25,9 +25,10 @@ anonymous.
 
 ## Scope
 
-LocalWrap runs a local control server and an Electron desktop shell. Areas of
+LocalWrap runs local development commands through an Electron desktop shell. Areas of
 particular interest:
 
 - Bypasses of port/URL input validation.
 - Renderer escapes (`contextIsolation` / preload boundary).
-- CSP or rate‑limit bypasses on the local API.
+- Bypasses of the IPC-only project action boundary.
+- Process-control issues around command allowlisting or project shutdown.

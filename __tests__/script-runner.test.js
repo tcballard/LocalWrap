@@ -32,8 +32,8 @@ describe('startScript (integration)', () => {
   });
 
   test('throws on a disallowed command before spawning', () => {
-    expect(() =>
-      startScript({ command: 'rm -rf /', onLine: () => {}, onExit: () => {} })
-    ).toThrow(/not allowed/);
+    expect(() => startScript({ command: 'rm -rf /', onLine: () => {}, onExit: () => {} })).toThrow(
+      /not allowed/
+    );
   });
 });

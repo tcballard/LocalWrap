@@ -5,6 +5,32 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2026-06-05
+
+### Added
+
+- Project launcher workflow: save local projects with directory, command, port,
+  app URL, autostart, and open-on-ready preferences.
+- IPC-only project actions for create/update/delete/start/stop/restart/open,
+  with live bounded logs and readiness tracking.
+- Package script discovery for selected project directories, preferring common
+  scripts like `dev`, `start`, `preview`, and `serve`.
+
+### Changed
+
+- The Electron UI now loads from `public/app.html` with a CSP meta tag instead
+  of being served by a localhost Express control server.
+- Replaced the server-control panel with a project dashboard and per-project log
+  view.
+- Refactored core behavior into importable modules for project storage, process
+  lifecycle, port checks, readiness polling, URL validation, and script discovery.
+- CI now checks Prettier formatting, and Jest is configured to avoid Watchman.
+
+### Removed
+
+- Removed the browser-accessible mutating localhost server-management API and the
+  no-longer-needed Express/Helmet/rate-limit runtime dependencies.
+
 ## [2.2.0] - 2026-06-03
 
 ### Added

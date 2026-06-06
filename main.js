@@ -1,428 +1,129 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, ipcMain } = require('electron');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
 const { autoUpdater } = require('electron-updater');
-const { startScript } = require('./lib/scriptRunner');
-const { validateLocalhostURL } = require('./lib/urlValidation');
+const { discoverPackageScripts } = require('./lib/packageScripts');
+const { findAvailablePort } = require('./lib/portUtils');
+const { ProjectLifecycle } = require('./lib/projectLifecycle');
+const { ProjectStore } = require('./lib/projectStore');
+const { validateLocalProjectURL } = require('./lib/urlValidation');
 
 let mainWindow;
 let tray;
+let projectStore;
+let projectLifecycle;
 
-// Dev-script execution state: pid -> { child, command, port, output }
-const runningScripts = new Map();
-const MAX_OUTPUT_LINES = 500;
+function getProjectsFilePath() {
+  return path.join(app.getPath('userData'), 'projects.json');
+}
 
-// Server Management System
-const servers = new Map(); // port -> server instance
-const SERVER_HOST = 'localhost';
-const DEFAULT_PORT = process.env.PORT || 
-                    process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
-                    3000;
-
-console.log(`🚀 LocalWrap initializing with default port ${DEFAULT_PORT}`);
-
-// Server Management Functions
-async function checkPortAvailable(port) {
-  return new Promise((resolve) => {
-    const net = require('net');
-    const server = net.createServer();
-    
-    server.listen(port, (err) => {
-      if (err) {
-        resolve(false);
-      } else {
-        server.once('close', () => resolve(true));
-        server.close();
-      }
-    });
-    
-    server.on('error', () => resolve(false));
+function createProjectStore() {
+  return new ProjectStore({
+    filePath: getProjectsFilePath(),
   });
 }
 
-// Find a free port at or after `preferred` (bounded scan).
-async function findAvailablePort(preferred) {
-  let candidate = preferred;
-  for (let i = 0; i < 100 && candidate <= 65535; i++, candidate++) {
-    if (await checkPortAvailable(candidate)) {
-      return candidate;
-    }
-  }
-  throw new Error('No available port found.');
-}
-
-async function startServer(port) {
-  try {
-    // Check if server already running on this port
-    if (servers.has(port)) {
-      throw new Error(`Server already running on port ${port}`);
-    }
-    
-    // Check if port is available
-    const available = await checkPortAvailable(port);
-    if (!available) {
-      throw new Error(`Port ${port} is already in use by another application`);
-    }
-    
-    const express = require('express');
-    const helmet = require('helmet');
-    const rateLimit = require('express-rate-limit');
-
-    const expressApp = express();
-    
-    // Security middleware
-    expressApp.use(helmet({
-      contentSecurityPolicy: {
-        directives: {
-          defaultSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
-          imgSrc: ["'self'", "data:", "blob:"],
-          connectSrc: ["'self'"],
-          fontSrc: ["'self'"],
-          objectSrc: ["'none'"],
-          mediaSrc: ["'self'"],
-          frameSrc: ["'none'"],
-        },
-      },
-      crossOriginEmbedderPolicy: false
-    }));
-    
-    // Rate limiting
-    const limiter = rateLimit({
-      windowMs: 15 * 60 * 1000, // 15 minutes
-      max: 100, // limit each IP to 100 requests per windowMs
-      message: 'Too many requests from this IP, please try again later.',
-      standardHeaders: true,
-      legacyHeaders: false,
-    });
-    expressApp.use('/api/', limiter);
-    
-    // Request size limiting
-    expressApp.use(express.json({ limit: '10mb' }));
-    expressApp.use(express.urlencoded({ extended: true, limit: '10mb' }));
-    
-    // Security headers
-    expressApp.use((req, res, next) => {
-      res.setHeader('X-Frame-Options', 'DENY');
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-      next();
-    });
-    
-    // Serve static files securely from public directory
-    const publicPath = path.join(__dirname, 'public');
-    expressApp.use(express.static(publicPath, {
-      dotfiles: 'deny',
-      index: false,
-      setHeaders: (res) => {
-        res.setHeader('Cache-Control', 'public, max-age=3600');
-      }
-    }));
-    
-    // API endpoints with input validation
-    expressApp.get('/api/status', (req, res) => {
-      res.json({ 
-        status: 'running', 
-        timestamp: new Date().toISOString(),
-        message: 'LocalWrap server is running securely!',
-        version: app.getVersion(),
-        port: port,
-        host: SERVER_HOST,
-        url: `http://${SERVER_HOST}:${port}`
-      });
-    });
-    
-    expressApp.get('/api/health', (req, res) => {
-      res.json({
-        healthy: true,
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        platform: process.platform
-      });
-    });
-    
-    // Server Management API Endpoints
-    expressApp.get('/api/servers', (req, res) => {
-      res.json({
-        servers: getServersStatus(),
-        total: servers.size
-      });
-    });
-    
-    expressApp.post('/api/servers/:port/start', async (req, res) => {
-      try {
-        const targetPort = parseInt(req.params.port);
-        if (isNaN(targetPort) || targetPort < 1000 || targetPort > 65535) {
-          return res.status(400).json({ error: 'Invalid port number (1000-65535)' });
-        }
-        
-        await startServer(targetPort);
-        res.json({ 
-          success: true, 
-          message: `Server started on port ${targetPort}`,
-          server: getServerStatus(targetPort)
-        });
-      } catch (error) {
-        res.status(400).json({ 
-          error: error.message,
-          success: false 
-        });
-      }
-    });
-    
-    expressApp.post('/api/servers/:port/stop', async (req, res) => {
-      try {
-        const targetPort = parseInt(req.params.port);
-        if (isNaN(targetPort)) {
-          return res.status(400).json({ error: 'Invalid port number' });
-        }
-        
-        await stopServer(targetPort);
-        res.json({ 
-          success: true, 
-          message: `Server stopped on port ${targetPort}`
-        });
-      } catch (error) {
-        res.status(400).json({ 
-          error: error.message,
-          success: false 
-        });
-      }
-    });
-    
-    expressApp.post('/api/servers/:port/restart', async (req, res) => {
-      try {
-        const targetPort = parseInt(req.params.port);
-        if (isNaN(targetPort)) {
-          return res.status(400).json({ error: 'Invalid port number' });
-        }
-        
-        await restartServer(targetPort);
-        res.json({ 
-          success: true, 
-          message: `Server restarted on port ${targetPort}`,
-          server: getServerStatus(targetPort)
-        });
-      } catch (error) {
-        res.status(400).json({ 
-          error: error.message,
-          success: false 
-        });
-      }
-    });
-    
-    expressApp.get('/api/servers/:port/status', (req, res) => {
-      const targetPort = parseInt(req.params.port);
-      if (isNaN(targetPort)) {
-        return res.status(400).json({ error: 'Invalid port number' });
-      }
-      
-      res.json(getServerStatus(targetPort));
-    });
-    
-    // Serve main page
-    expressApp.get('/', (req, res) => {
-      res.sendFile(path.join(__dirname, 'public', 'app.html'));
-    });
-    
-    // 404 handler
-    expressApp.use((req, res) => {
-      res.status(404).json({ error: 'Not found' });
-    });
-    
-    // Error handler (4 args required for Express to treat this as one)
-    expressApp.use((err, _req, res, _next) => {
-      console.error('Server error:', err);
-      res.status(500).json({ error: 'Internal server error' });
-    });
-    
-    return new Promise((resolve, reject) => {
-      const server = expressApp.listen(port, SERVER_HOST, (err) => {
-        if (err) {
-          reject(err);
-        } else {
-          // Store server instance
-          servers.set(port, {
-            instance: server,
-            app: expressApp,
-            port: port,
-            status: 'running',
-            startTime: new Date()
-          });
-          
-          console.log(`✅ LocalWrap server started on http://${SERVER_HOST}:${port}`);
-          resolve(server);
-        }
-      });
-    });
-  } catch (error) {
-    console.error(`Failed to start server on port ${port}:`, error);
-    throw error;
-  }
-}
-
-async function stopServer(port) {
-  try {
-    const serverInfo = servers.get(port);
-    if (!serverInfo) {
-      throw new Error(`No server running on port ${port}`);
-    }
-    
-    return new Promise((resolve) => {
-      serverInfo.instance.close(() => {
-        servers.delete(port);
-        console.log(`🛑 LocalWrap server stopped on port ${port}`);
-        resolve();
-      });
-    });
-  } catch (error) {
-    console.error(`Failed to stop server on port ${port}:`, error);
-    throw error;
-  }
-}
-
-async function restartServer(port) {
-  try {
-    await stopServer(port);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-    await startServer(port);
-    console.log(`🔄 LocalWrap server restarted on port ${port}`);
-  } catch (error) {
-    console.error(`Failed to restart server on port ${port}:`, error);
-    throw error;
-  }
-}
-
-function getServersStatus() {
-  const status = [];
-  for (const [port, serverInfo] of servers.entries()) {
-    status.push({
-      port: port,
-      status: serverInfo.status,
-      url: `http://${SERVER_HOST}:${port}`,
-      startTime: serverInfo.startTime,
-      uptime: Date.now() - serverInfo.startTime.getTime()
-    });
-  }
-  return status;
-}
-
-function getServerStatus(port) {
-  const serverInfo = servers.get(port);
-  if (!serverInfo) {
-    return { port: port, status: 'stopped' };
-  }
-  
+function serializeProject(project) {
   return {
-    port: port,
-    status: serverInfo.status,
-    url: `http://${SERVER_HOST}:${port}`,
-    startTime: serverInfo.startTime,
-    uptime: Date.now() - serverInfo.startTime.getTime()
+    ...project,
+    runtime: projectLifecycle
+      ? projectLifecycle.getState(project.id)
+      : { status: 'stopped', logs: [] },
   };
 }
 
+function serializeProjects() {
+  return projectStore.list().map(serializeProject);
+}
+
+function getProjectOrThrow(projectId) {
+  const project = projectStore.get(projectId);
+  if (!project) {
+    throw new Error('Project not found.');
+  }
+  return project;
+}
+
+function sendToRenderer(channel, payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send(channel, payload);
+  }
+}
+
+function emitProjectListChanged() {
+  sendToRenderer('project:list-changed', serializeProjects());
+  refreshTray();
+}
+
+function openProject(project) {
+  if (!validateLocalProjectURL(project.url)) {
+    throw new Error('Project URL must be local.');
+  }
+  shell.openExternal(project.url);
+}
+
 function createWindow() {
-  // Security: Create secure browser window
   mainWindow = new BrowserWindow({
-    // === WINDOW APPEARANCE ===
-    width: 1200,              
-    height: 800,              
-    minWidth: 800,            
-    minHeight: 600,           
-    
-    // === WINDOW BEHAVIOR ===
-    resizable: true,          
-    center: true,             
-    
-    // === VISUAL APPEARANCE ===
-    backgroundColor: '#667eea', 
-    autoHideMenuBar: true,    
-    
-    // === WINDOW STARTUP ===
-    show: false,              
-    
-    // === SIMPLIFIED SECURITY SETTINGS ===
-    webPreferences: {
-      nodeIntegration: false,        
-      contextIsolation: true,        
-      preload: path.join(__dirname, 'preload.js'), // Minimal preload with no IPC
-      webSecurity: true,             
-      allowRunningInsecureContent: false,
-      sandbox: true,                 
-      // REMOVED: devTools settings
-    },
-    
-    // === ICON ===
+    width: 1120,
+    height: 760,
+    minWidth: 860,
+    minHeight: 620,
+    resizable: true,
+    center: true,
+    backgroundColor: '#f0f0f0',
+    autoHideMenuBar: true,
+    show: false,
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    
-    // === NO DEV OPTIONS ===
-    // Removed all DevTools functionality
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      preload: path.join(__dirname, 'preload.js'),
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+      sandbox: true,
+    },
   });
 
-  // Security: Set window title
-  mainWindow.setTitle('LocalWrap - Secure Development Server');
+  mainWindow.setTitle('LocalWrap - Project Launcher');
 
-  // Security: Handle external links
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (validateLocalhostURL(url)) {
-      return { action: 'allow' };
+    if (validateLocalProjectURL(url)) {
+      shell.openExternal(url);
     }
-    shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // Security: Prevent navigation to external sites
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
-    if (!validateLocalhostURL(navigationUrl)) {
-      event.preventDefault();
+    const appURL = mainWindow.webContents.getURL();
+    if (navigationUrl === appURL) {
+      return;
+    }
+
+    event.preventDefault();
+    if (validateLocalProjectURL(navigationUrl)) {
       shell.openExternal(navigationUrl);
     }
   });
 
-  // Load the localhost URL after validation
-  const targetURL = `http://${SERVER_HOST}:${DEFAULT_PORT}`;
-  if (validateLocalhostURL(targetURL)) {
-    mainWindow.loadURL(targetURL);
-  } else {
-    console.error('Invalid server URL');
-    app.quit();
-  }
+  mainWindow.loadFile(path.join(__dirname, 'public', 'app.html'));
 
-  // Show window when ready
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    // Removed JavaScript injection to eliminate errors
   });
 
-  // Handle window closed (minimize to tray)
   mainWindow.on('close', (event) => {
     if (!app.isQuiting) {
       event.preventDefault();
       mainWindow.hide();
-      
-      // Show notification on first minimize
-      if (!mainWindow.isMinimizedToTray) {
-        mainWindow.isMinimizedToTray = true;
-      }
     }
     return false;
   });
 
-  // Security: Clear cache on close
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
-
-  // Development: Open DevTools only in dev mode
-  // Removed all DevTools functionality
 }
 
-// Auto-update via electron-updater. Reads the GitHub publish config + latest*.yml
-// from releases. Works on Windows/Linux out of the box; silent macOS updates
-// additionally require code signing (a paid follow-on), so unsigned mac builds
-// will simply report no update / error rather than self-updating.
 function checkForUpdates({ silent = false } = {}) {
   if (!app.isPackaged) {
     if (!silent) {
@@ -435,6 +136,7 @@ function checkForUpdates({ silent = false } = {}) {
     }
     return;
   }
+
   autoUpdater.checkForUpdatesAndNotify().catch((err) => {
     console.error('Update check failed:', err);
     if (!silent) {
@@ -443,30 +145,14 @@ function checkForUpdates({ silent = false } = {}) {
   });
 }
 
-function createTray() {
-  // Create tray icon
-  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
-  let trayIcon;
-  
-  try {
-    if (fs.existsSync(iconPath)) {
-      trayIcon = nativeImage.createFromPath(iconPath);
-      // Ensure proper size for macOS tray
-      if (process.platform === 'darwin') {
-        trayIcon = trayIcon.resize({ width: 16, height: 16 });
-      }
-    } else {
-      // Fallback: create a simple colored icon
-      trayIcon = nativeImage.createEmpty();
-    }
-  } catch (error) {
-    console.error('Error creating tray icon:', error);
-    trayIcon = nativeImage.createEmpty();
-  }
-  
-  tray = new Tray(trayIcon);
-  
-  const contextMenu = Menu.buildFromTemplate([
+function createTrayMenuTemplate() {
+  const projects = projectStore ? serializeProjects() : [];
+  const activeProjects = projects.filter((project) =>
+    ['starting', 'running', 'ready', 'stopping'].includes(project.runtime.status)
+  );
+  const readyProjects = projects.filter((project) => project.runtime.status === 'ready');
+
+  return [
     {
       label: 'Show LocalWrap',
       click: () => {
@@ -474,26 +160,23 @@ function createTray() {
           mainWindow.show();
           mainWindow.focus();
         }
-      }
+      },
     },
     {
-      label: 'Open Main Server',
+      label: 'Open Ready Projects',
+      enabled: readyProjects.length > 0,
       click: () => {
-        shell.openExternal(`http://${SERVER_HOST}:${DEFAULT_PORT}`);
-      }
+        readyProjects.forEach(openProject);
+      },
     },
     { type: 'separator' },
     {
-      label: 'Server Status',
-      enabled: false
-    },
-    {
-      label: `✅ Running ${servers.size} server(s)`,
-      enabled: false
+      label: `${activeProjects.length} running / ${projects.length} saved project(s)`,
+      enabled: false,
     },
     { type: 'separator' },
     {
-      label: 'Check for Updates…',
+      label: 'Check for Updates...',
       click: () => checkForUpdates(),
     },
     {
@@ -503,170 +186,214 @@ function createTray() {
           type: 'info',
           title: 'About LocalWrap',
           message: 'LocalWrap',
-          detail: `Version ${app.getVersion()}\nSecure desktop wrapper for localhost development servers.\n\nBuilt with Electron + Express`,
-          buttons: ['OK']
+          detail: `Version ${app.getVersion()}\nSecure desktop launcher for local development projects.\n\nBuilt with Electron`,
+          buttons: ['OK'],
         });
-      }
+      },
     },
     {
       label: 'Quit LocalWrap',
       click: () => {
         app.isQuiting = true;
         app.quit();
+      },
+    },
+  ];
+}
+
+function refreshTray() {
+  if (tray) {
+    tray.setContextMenu(Menu.buildFromTemplate(createTrayMenuTemplate()));
+  }
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, 'assets', 'tray-icon.png');
+  let trayIcon;
+
+  try {
+    if (fs.existsSync(iconPath)) {
+      trayIcon = nativeImage.createFromPath(iconPath);
+      if (process.platform === 'darwin' && trayIcon.resize) {
+        trayIcon = trayIcon.resize({ width: 16, height: 16 });
       }
+    } else {
+      trayIcon = nativeImage.createEmpty();
     }
-  ]);
-  
-  tray.setContextMenu(contextMenu);
-  tray.setToolTip('LocalWrap - Secure Development Server');
-  
-  // Double click to show/hide window
+  } catch (error) {
+    console.error('Error creating tray icon:', error);
+    trayIcon = nativeImage.createEmpty();
+  }
+
+  tray = new Tray(trayIcon);
+  refreshTray();
+  tray.setToolTip('LocalWrap - Project Launcher');
+
   tray.on('double-click', () => {
-    if (mainWindow) {
-      if (mainWindow.isVisible()) {
-        mainWindow.hide();
-      } else {
-        mainWindow.show();
-        mainWindow.focus();
-      }
+    if (!mainWindow) return;
+
+    if (mainWindow.isVisible()) {
+      mainWindow.hide();
+    } else {
+      mainWindow.show();
+      mainWindow.focus();
     }
   });
 }
 
-// === IPC HANDLERS (privileged dev-script actions, desktop-only) ===
-// These are exposed ONLY through the preload contextBridge, so a plain
-// browser hitting the localhost server cannot reach them.
-
-function sendToRenderer(channel, payload) {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(channel, payload);
+function assertSafeProjectMutation(projectId, patch = {}) {
+  const project = getProjectOrThrow(projectId);
+  if (!projectLifecycle.isActive(projectId)) {
+    return;
   }
-}
 
-function killRunningScripts() {
-  for (const [, info] of runningScripts.entries()) {
-    try { info.child.kill(); } catch (_) { /* ignore */ }
+  for (const key of ['cwd', 'command', 'port', 'url']) {
+    if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== project[key]) {
+      throw new Error('Stop the project before changing its directory, command, port, or URL.');
+    }
   }
-  runningScripts.clear();
 }
 
 function registerIpcHandlers() {
-  // Run a dev script (allowlisted command, no shell on macOS/Linux).
-  ipcMain.handle('script:run', async (event, payload = {}) => {
-    const { command, port, workingDir } = payload;
+  ipcMain.handle('project:list', () => serializeProjects());
 
-    // Choose a free port (avoid LocalWrap's own ports / busy ports).
-    let requestedPort = parseInt(port, 10);
-    if (isNaN(requestedPort) || requestedPort < 1000 || requestedPort > 65535) {
-      requestedPort = DEFAULT_PORT + 1;
+  ipcMain.handle('project:create', async (_event, payload = {}) => {
+    const project = projectStore.create(payload);
+    emitProjectListChanged();
+
+    if (project.autostart) {
+      projectLifecycle.start(project).catch((error) => console.error('Autostart failed:', error));
     }
-    const actualPort = await findAvailablePort(requestedPort);
 
-    // pid is only known after spawn; callbacks read it lazily (output events
-    // fire asynchronously, after state.pid is assigned below).
-    const state = { pid: null, output: [] };
-    const onLine = (line) => {
-      state.output.push(line);
-      if (state.output.length > MAX_OUTPUT_LINES) state.output.shift();
-      sendToRenderer('script:output', { pid: state.pid, line });
-    };
-    const onExit = (code) => {
-      onLine(`[process exited with code ${code}]`);
-      runningScripts.delete(state.pid);
-      sendToRenderer('script:exit', { pid: state.pid, code });
-    };
-
-    // startScript validates the command + working dir (throws on bad input).
-    const child = startScript({ command, cwd: workingDir, port: actualPort, onLine, onExit });
-    state.pid = child.pid;
-    runningScripts.set(child.pid, { child, command, port: actualPort, output: state.output });
-
-    return { pid: child.pid, port: actualPort, command };
+    return serializeProject(project);
   });
 
-  // Stop a running script by pid.
-  ipcMain.handle('script:stop', (event, pid) => {
-    const info = runningScripts.get(pid);
-    if (!info) {
-      return { success: false, error: 'No running script with that id.' };
-    }
-    try {
-      info.child.kill();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
+  ipcMain.handle('project:suggestPort', (_event, preferredPort = 3000) =>
+    findAvailablePort(preferredPort)
+  );
+
+  ipcMain.handle('project:update', (_event, projectId, patch = {}) => {
+    assertSafeProjectMutation(projectId, patch);
+    const project = projectStore.update(projectId, patch);
+    emitProjectListChanged();
+    return serializeProject(project);
   });
 
-  // Native folder picker for the working directory.
+  ipcMain.handle('project:delete', async (_event, projectId) => {
+    await projectLifecycle.stop(projectId);
+    projectStore.delete(projectId);
+    emitProjectListChanged();
+    return true;
+  });
+
+  ipcMain.handle('project:start', async (_event, projectId) => {
+    const project = getProjectOrThrow(projectId);
+    const state = await projectLifecycle.start(project);
+    emitProjectListChanged();
+    return state;
+  });
+
+  ipcMain.handle('project:stop', async (_event, projectId) => {
+    const state = await projectLifecycle.stop(projectId);
+    emitProjectListChanged();
+    return state;
+  });
+
+  ipcMain.handle('project:restart', async (_event, projectId) => {
+    const project = getProjectOrThrow(projectId);
+    const state = await projectLifecycle.restart(project);
+    emitProjectListChanged();
+    return state;
+  });
+
+  ipcMain.handle('project:open', (_event, projectId) => {
+    const project = getProjectOrThrow(projectId);
+    openProject(project);
+    return true;
+  });
+
+  ipcMain.handle('project:discoverScripts', (_event, cwd) => discoverPackageScripts(cwd));
+
   ipcMain.handle('dir:select', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Select working directory',
+      title: 'Select project directory',
       properties: ['openDirectory'],
     });
+
     if (result.canceled || result.filePaths.length === 0) {
       return null;
     }
+
     return result.filePaths[0];
   });
 
   ipcMain.handle('dir:current', () => process.cwd());
 }
 
-// App event handlers
+async function startAutostartProjects() {
+  const projects = projectStore.list().filter((project) => project.autostart);
+  for (const project of projects) {
+    try {
+      await projectLifecycle.start(project);
+    } catch (error) {
+      console.error(`Failed to autostart ${project.name}:`, error);
+    }
+  }
+}
+
 app.whenReady().then(async () => {
   try {
-    // Start the default server
-    await startServer(DEFAULT_PORT);
-    
-    // Then create the window and tray
+    projectStore = createProjectStore();
+    projectLifecycle = new ProjectLifecycle({ openProject });
+    projectLifecycle.on('event', (event) => {
+      sendToRenderer('project:event', event);
+      if (event.type === 'state') {
+        refreshTray();
+      }
+    });
+
+    registerIpcHandlers();
     createWindow();
     createTray();
-    registerIpcHandlers();
-
-    // Check for updates on launch (no-op in dev / unpackaged).
+    await startAutostartProjects();
     checkForUpdates({ silent: true });
-    
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         createWindow();
+      } else if (mainWindow) {
+        mainWindow.show();
       }
     });
   } catch (error) {
     console.error('Failed to start LocalWrap:', error);
-    dialog.showErrorBox('LocalWrap Error', 'Failed to start the development server. Please check the console for details.');
+    dialog.showErrorBox(
+      'LocalWrap Error',
+      'Failed to start LocalWrap. Please check the console for details.'
+    );
     app.quit();
   }
 });
 
 app.on('window-all-closed', () => {
-  // On macOS, keep app running even when all windows are closed
   if (process.platform !== 'darwin') {
-    // Don't quit, just hide to tray
+    // Keep the tray process alive.
   }
 });
 
 app.on('before-quit', () => {
   app.isQuiting = true;
-
-  // Stop any running dev scripts
-  killRunningScripts();
-
-  // Clean up all servers
-  for (const [, serverInfo] of servers.entries()) {
-    serverInfo.instance.close();
+  if (projectLifecycle) {
+    projectLifecycle.stopAll().catch((error) => console.error('Failed to stop projects:', error));
   }
-  servers.clear();
 });
 
-// Security: Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
-    // Someone tried to run a second instance, focus our window instead
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
       mainWindow.show();
@@ -675,10 +402,8 @@ if (!gotTheLock) {
   });
 }
 
-// Security: Handle certificate errors
-app.on('certificate-error', (event, webContents, url, error, certificate, callback) => {
-  // For localhost development, we might need to handle self-signed certificates
-  if (url.startsWith(`http://${SERVER_HOST}:`)) {
+app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+  if (validateLocalProjectURL(url)) {
     event.preventDefault();
     callback(true);
   } else {
@@ -686,15 +411,15 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
   }
 });
 
-// Security: Prevent new window creation
-app.on('web-contents-created', (event, contents) => {
+app.on('web-contents-created', (_event, contents) => {
   contents.on('new-window', (event, navigationUrl) => {
     event.preventDefault();
-    shell.openExternal(navigationUrl);
+    if (validateLocalProjectURL(navigationUrl)) {
+      shell.openExternal(navigationUrl);
+    }
   });
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   app.quit();
 });

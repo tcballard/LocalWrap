@@ -21,6 +21,8 @@ jobs:
 
       - run: npm run lint
 
+      - run: npm run format:check
+
       - run: npm test
 
       # Surface high-severity advisories without blocking unrelated PRs.

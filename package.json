@@ -1,116 +1,109 @@
 {
-    "name": "localwrap",
-    "version": "2.2.0",
-    "description": "Secure desktop wrapper for localhost development servers",
-    "main": "main.js",
-    "scripts": {
-        "start": "electron .",
-        "dev": "electron . --dev",
-        "start:3000": "PORT=3000 electron .",
-        "start:3001": "PORT=3001 electron .",
-        "start:3002": "PORT=3002 electron .",
-        "start:8000": "PORT=8000 electron .",
-        "start:8080": "PORT=8080 electron .",
-        "dev:3001": "PORT=3001 electron . --dev",
-        "dev:8000": "PORT=8000 electron . --dev",
-        "build": "electron-builder",
-        "build:mac": "electron-builder --mac",
-        "build:win": "electron-builder --win",
-        "build:linux": "electron-builder --linux",
-        "dist": "electron-builder --publish=never",
-        "dist:mac": "electron-builder --mac --publish=never",
-        "dist:win": "electron-builder --win --publish=never",
-        "dist:linux": "electron-builder --linux --publish=never",
-        "security-check": "npx electron-builder --dir --config.nsis.oneClick=false",
-        "test": "jest",
-        "test:watch": "jest --watch",
-        "test:coverage": "jest --coverage",
-        "lint": "eslint .",
-        "format": "prettier --write .",
-        "format:check": "prettier --check ."
-    },
-    "keywords": [
-        "electron",
-        "desktop",
-        "localhost",
-        "wrapper",
-        "dev-server",
-        "development"
+  "name": "localwrap",
+  "version": "2.3.0",
+  "description": "Secure desktop launcher for local development projects",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "dist": "electron-builder --publish=never",
+    "dist:mac": "electron-builder --mac --publish=never",
+    "dist:win": "electron-builder --win --publish=never",
+    "dist:linux": "electron-builder --linux --publish=never",
+    "security-check": "npx electron-builder --dir --config.nsis.oneClick=false",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "keywords": [
+    "electron",
+    "desktop",
+    "localhost",
+    "wrapper",
+    "dev-server",
+    "development"
+  ],
+  "author": "Tom Ballard",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tcballard/LocalWrap.git"
+  },
+  "homepage": "https://github.com/tcballard/LocalWrap#readme",
+  "bugs": {
+    "url": "https://github.com/tcballard/LocalWrap/issues"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/jest": "^30.0.0",
+    "electron": "^42.0.0",
+    "electron-builder": "^26.0.0",
+    "eslint": "^10.4.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.6.0",
+    "jest": "^30.0.5",
+    "prettier": "^3.8.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
+  },
+  "build": {
+    "appId": "com.localwrap.app",
+    "productName": "LocalWrap",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "tcballard",
+        "repo": "LocalWrap"
+      }
     ],
-    "author": "Tom Ballard",
-    "license": "MIT",
-    "repository": {
-        "type": "git",
-        "url": "git+https://github.com/tcballard/LocalWrap.git"
+    "directories": {
+      "output": "dist"
     },
-    "homepage": "https://github.com/tcballard/LocalWrap#readme",
-    "bugs": {
-        "url": "https://github.com/tcballard/LocalWrap/issues"
+    "files": [
+      "main.js",
+      "preload.js",
+      "lib/**/*",
+      "public/**/*",
+      "!public/**/*.md",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/test/**/*",
+      "!node_modules/**/*.d.ts"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "requestedExecutionLevel": "asInvoker"
     },
-    "devDependencies": {
-        "@eslint/js": "^10.0.1",
-        "@types/jest": "^30.0.0",
-        "electron": "^42.0.0",
-        "electron-builder": "^26.0.0",
-        "eslint": "^10.4.1",
-        "eslint-config-prettier": "^10.1.8",
-        "globals": "^17.6.0",
-        "jest": "^30.0.5",
-        "prettier": "^3.8.3"
-    },
-    "dependencies": {
-        "electron-updater": "^6.8.3",
-        "express": "^4.19.2",
-        "express-rate-limit": "^7.2.0",
-        "helmet": "^8.0.0"
-    },
-    "build": {
-        "appId": "com.localwrap.app",
-        "productName": "LocalWrap",
-        "publish": [
-            {
-                "provider": "github",
-                "owner": "tcballard",
-                "repo": "LocalWrap"
-            }
-        ],
-        "directories": {
-            "output": "dist"
-        },
-        "files": [
-            "main.js",
-            "preload.js",
-            "lib/**/*",
-            "public/**/*",
-            "!public/**/*.md",
-            "assets/**/*",
-            "node_modules/**/*",
-            "!node_modules/**/test/**/*",
-            "!node_modules/**/*.d.ts"
-        ],
-        "win": {
-            "target": "nsis",
-            "icon": "assets/icon.ico",
-            "requestedExecutionLevel": "asInvoker"
-        },
-        "mac": {
-            "icon": "assets/icon.icns",
-            "target": [
-                {
-                    "target": "dmg",
-                    "arch": ["x64", "arm64"]
-                }
-            ]
-        },
-        "linux": {
-            "target": "AppImage",
-            "icon": "assets/icon.png"
-        },
-        "nsis": {
-            "oneClick": false,
-            "allowToChangeInstallationDirectory": true,
-            "createDesktopShortcut": "always",
-            "createStartMenuShortcut": true
+    "mac": {
+      "icon": "assets/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
+      ]
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true
     }
+  }
 }

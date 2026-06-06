@@ -1,26 +1,23 @@
-// Tests the real validateLocalhostURL used by main.js (imported, not a copy).
-const { validateLocalhostURL } = require('../lib/urlValidation');
+const { validateLocalhostURL, validateLocalProjectURL } = require('../lib/urlValidation');
 
-describe('validateLocalhostURL', () => {
-  test('accepts correct localhost URLs', () => {
-    expect(validateLocalhostURL('http://localhost:3000')).toBe(true);
-    expect(validateLocalhostURL('http://127.0.0.1:8080')).toBe(true);
-    expect(validateLocalhostURL('http://localhost:5000')).toBe(true);
+describe('local URL validation', () => {
+  test('accepts local http project URLs on allowed ports', () => {
+    expect(validateLocalProjectURL('http://localhost:3000')).toBe(true);
+    expect(validateLocalProjectURL('http://127.0.0.1:8080')).toBe(true);
+    expect(validateLocalProjectURL('http://[::1]:5173')).toBe(true);
   });
 
-  test('rejects invalid URLs', () => {
-    expect(validateLocalhostURL('https://localhost:3000')).toBe(false); // wrong protocol
-    expect(validateLocalhostURL('http://google.com:3000')).toBe(false); // wrong hostname
-    expect(validateLocalhostURL('http://localhost:999')).toBe(false); // port too low
-    expect(validateLocalhostURL('http://localhost:70000')).toBe(false); // port too high
-    expect(validateLocalhostURL('not-a-url')).toBe(false); // invalid URL
-    expect(validateLocalhostURL('')).toBe(false); // empty string
+  test('accepts https for project URLs but keeps legacy localhost validation http-only', () => {
+    expect(validateLocalProjectURL('https://localhost:3000')).toBe(true);
+    expect(validateLocalhostURL('https://localhost:3000')).toBe(false);
   });
 
-  test('handles port boundaries', () => {
-    expect(validateLocalhostURL('http://localhost:1000')).toBe(true); // minimum port
-    expect(validateLocalhostURL('http://localhost:65535')).toBe(true); // maximum port
-    expect(validateLocalhostURL('http://localhost:999')).toBe(false); // below minimum
-    expect(validateLocalhostURL('http://localhost:65536')).toBe(false); // above maximum
+  test('rejects non-local hosts, invalid ports, and malformed input', () => {
+    expect(validateLocalProjectURL('http://example.com:3000')).toBe(false);
+    expect(validateLocalProjectURL('http://localhost:999')).toBe(false);
+    expect(validateLocalProjectURL('http://localhost:65536')).toBe(false);
+    expect(validateLocalProjectURL('ftp://localhost:3000')).toBe(false);
+    expect(validateLocalProjectURL('not-a-url')).toBe(false);
+    expect(validateLocalProjectURL('')).toBe(false);
   });
 });
