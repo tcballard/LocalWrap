@@ -4,20 +4,31 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![Electron](https://img.shields.io/badge/electron-42-47848F.svg)](https://www.electronjs.org)
 
-A secure desktop wrapper for localhost development servers. LocalWrap gives you a
-small, retro Windows‑95‑styled desktop app to start, stop, and open multiple local
-dev servers — no terminal juggling required.
+A secure desktop launcher for local development projects. LocalWrap gives you a
+small, retro Windows-95-styled desktop app to save projects, run their dev
+commands, stream logs, track readiness, and open the local app URL without
+terminal juggling.
 
 ## Features
 
-- **Multi‑server management** — start/stop/restart servers on any port (1000–65535)
-  from a single window.
-- **One‑click open** — launch any running server in your browser.
-- **System tray integration** — minimize to the tray and keep servers running in the
-  background.
-- **Secure by default** — Content‑Security‑Policy headers (Helmet), rate limiting,
-  input validation, and Electron context isolation with no Node integration in the
-  renderer.
+- **Saved project launcher** — keep project directory, command, port, URL,
+  autostart, and open-on-ready preferences in one place.
+- **Guided project import** — pick a repo and LocalWrap suggests the name,
+  command, port, and URL from common package scripts.
+- **Process control** — start/stop/restart dev commands with `PORT` injected and
+  bounded live output.
+- **Readiness tracking** — LocalWrap polls local `http`/`https` URLs and marks
+  projects ready when they respond.
+- **Inline validation** — see missing directories, unsafe commands, invalid URLs,
+  and busy ports before saving or starting.
+- **Project Doctor** — see preflight checks, start timeline, readiness diagnosis,
+  safe fixes, and a copyable report when a project needs attention.
+- **One-click open** — launch a ready local app in your browser.
+- **System tray integration** — minimize to the tray and keep projects running in
+  the background.
+- **Secure by default** — privileged actions are IPC-only, commands are
+  allowlisted, local URLs are validated, and Electron runs with context isolation
+  and no Node integration in the renderer.
 - **Cross‑platform** — Windows, macOS, and Linux.
 
 ## Download
@@ -25,18 +36,18 @@ dev servers — no terminal juggling required.
 Grab a prebuilt installer for your platform from the
 [**Releases page**](https://github.com/tcballard/LocalWrap/releases):
 
-| Platform | File |
-| --- | --- |
-| Windows  | `.exe` installer (NSIS) |
+| Platform | File                           |
+| -------- | ------------------------------ |
+| Windows  | `.exe` installer (NSIS)        |
 | macOS    | `.dmg` (Intel + Apple Silicon) |
-| Linux    | `.AppImage` |
+| Linux    | `.AppImage`                    |
 
 LocalWrap checks for updates on launch (and via the tray's **Check for Updates…**).
 Auto-update works on Windows and Linux today; signed macOS auto-update is planned.
 
 > **Note:** the installers are not code‑signed yet, so Windows SmartScreen and
 > macOS Gatekeeper will warn about an "unknown developer." On Windows choose
-> *More info → Run anyway*; on macOS right‑click the app and choose *Open* the
+> _More info → Run anyway_; on macOS right‑click the app and choose _Open_ the
 > first time.
 
 ## Requirements (to build/run from source)
@@ -57,12 +68,14 @@ npm install
 ```bash
 npm start          # launch the app
 npm run dev        # launch with dev flag
-
-# launch bound to a specific default port
-npm run start:3000
-npm run start:8080
-npm run dev:3001
 ```
+
+## Demo Project
+
+This repo includes a dependency-free sample app at
+`examples/sample-project`. Import that folder in LocalWrap to test project
+inspection, start/stop/restart, readiness, logs, Project Doctor, and open-in-
+browser behavior without setting up another repo.
 
 ## Build distributables
 
@@ -89,11 +102,17 @@ npm run test:coverage
 
 LocalWrap is built defensively:
 
-- **Helmet** sets a strict Content‑Security‑Policy and other hardening headers.
-- **express-rate-limit** caps requests (100 per 15 minutes) to the local control API.
-- **validator** sanitizes and validates user‑supplied ports and URLs.
+- The app UI is loaded from a local file with a strict Content-Security-Policy;
+  there is no browser-accessible mutating localhost control API.
+- Project launch, process control, directory picking, and URL opening are only
+  reachable through Electron IPC exposed by the preload script.
+- Dev commands are restricted to an allowlist (`npm`, `npx`, `yarn`, `pnpm`,
+  `node`, `bun`, `python`, `python3`, `deno`) and shell metacharacters are
+  rejected.
+- Local project URLs are limited to `localhost`, `127.0.0.1`, and `::1` on
+  ports 1000-65535.
 - The Electron renderer runs with `contextIsolation` enabled and `nodeIntegration`
-  disabled; the preload script exposes no privileged IPC.
+  disabled.
 
 Found a vulnerability? Please see [SECURITY.md](SECURITY.md).
 

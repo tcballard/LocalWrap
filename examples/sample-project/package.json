@@ -1,0 +1,11 @@
+{
+  "name": "localwrap-sample-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dependency-free local app for testing and demoing LocalWrap.",
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "preview": "node server.js"
+  }
+}

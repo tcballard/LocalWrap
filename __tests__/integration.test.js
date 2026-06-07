@@ -1,68 +1,59 @@
-// Integration tests for LocalWrap
-describe('LocalWrap Integration', () => {
-  // Mock environment variables
-  const originalEnv = process.env;
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const { discoverPackageScripts } = require('../lib/packageScripts');
+const { probeURL, waitForReady } = require('../lib/readiness');
 
-  beforeEach(() => {
-    jest.resetModules();
-    process.env = { ...originalEnv };
-  });
+function createTempDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'localwrap-integration-'));
+}
+
+describe('project launcher integration helpers', () => {
+  let tempDir;
 
   afterEach(() => {
-    process.env = originalEnv;
+    if (tempDir) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      tempDir = null;
+    }
   });
 
-  test('should set default port correctly', () => {
-    // Test default port when no environment variable is set
-    delete process.env.PORT;
-    
-    // Mock the main.js logic for default port
-    const getDefaultPort = () => {
-      return process.env.PORT || 
-             process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
-             3000;
-    };
-    
-    expect(getDefaultPort()).toBe(3000);
+  test('discovers package scripts in preferred launch order', () => {
+    tempDir = createTempDir();
+    fs.writeFileSync(
+      path.join(tempDir, 'package.json'),
+      JSON.stringify({
+        scripts: {
+          test: 'jest',
+          preview: 'vite preview',
+          dev: 'vite',
+          start: 'node server.js',
+        },
+      })
+    );
+
+    expect(discoverPackageScripts(tempDir).map((script) => script.command)).toEqual([
+      'npm run dev',
+      'npm start',
+      'npm run preview',
+      'npm run test',
+    ]);
   });
 
-  test('should use PORT environment variable', () => {
-    process.env.PORT = '8080';
-    
-    const getDefaultPort = () => {
-      return process.env.PORT || 
-             process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
-             3000;
-    };
-    
-    expect(getDefaultPort()).toBe('8080');
+  test('waitForReady polls until a probe succeeds', async () => {
+    const probe = jest.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await expect(
+      waitForReady('http://localhost:3000', {
+        timeoutMs: 200,
+        intervalMs: 1,
+        probe,
+      })
+    ).resolves.toBe(true);
+    expect(probe).toHaveBeenCalledTimes(2);
   });
 
-  test('should parse port from command line arguments', () => {
-    delete process.env.PORT;
-    const originalArgv = process.argv;
-    process.argv = ['node', 'main.js', '--port=5000'];
-    
-    const getDefaultPort = () => {
-      return process.env.PORT || 
-             process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] || 
-             3000;
-    };
-    
-    expect(getDefaultPort()).toBe('5000');
-    
-    // Restore original argv
-    process.argv = originalArgv;
+  test('probeURL rejects non-local URLs without network access', async () => {
+    await expect(probeURL('https://example.com:3000')).resolves.toBe(false);
   });
-
-  test('should validate server host configuration', () => {
-    const SERVER_HOST = 'localhost';
-    expect(SERVER_HOST).toBe('localhost');
-    expect(typeof SERVER_HOST).toBe('string');
-  });
-
-  test('should handle development mode flag', () => {
-    const isDevMode = process.argv.includes('--dev');
-    expect(typeof isDevMode).toBe('boolean');
-  });
-}); 
+});

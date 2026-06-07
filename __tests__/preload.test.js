@@ -1,11 +1,10 @@
 // Tests the real preload.js by mocking electron and capturing the API it
-// exposes via contextBridge (rather than re-declaring a copy of the object).
+// exposes via contextBridge.
 
-// Names must be prefixed with `mock` to satisfy jest.mock factory hoisting.
 const mockInvoke = jest.fn(() => Promise.resolve());
 const mockOn = jest.fn();
 const mockRemoveListener = jest.fn();
-let exposed; // { key, api } captured from contextBridge.exposeInMainWorld
+let exposed;
 
 jest.mock(
   'electron',
@@ -32,47 +31,119 @@ beforeAll(() => {
 });
 
 describe('preload contextBridge API', () => {
-  test('exposes localwrapAPI with the expected surface', () => {
+  test('exposes localwrapAPI with the expected project surface', () => {
     expect(exposed.key).toBe('localwrapAPI');
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(typeof api.version).toBe('string');
+    expect(api.version).toBe('2.5.0');
+
     for (const method of [
-      'runScript',
-      'stopScript',
-      'onScriptOutput',
-      'onScriptExit',
+      'listProjects',
+      'inspectDirectory',
+      'validateProjectDraft',
+      'diagnoseProjectDraft',
+      'createProject',
+      'updateProject',
+      'deleteProject',
+      'startProject',
+      'stopProject',
+      'restartProject',
+      'openProject',
+      'discoverScripts',
+      'suggestPort',
+      'checkProjectPort',
+      'clearProjectLogs',
+      'copyProjectLogs',
+      'applyDoctorAction',
+      'copyDoctorReport',
+      'revealProjectDirectory',
       'selectDirectory',
       'getCurrentDirectory',
+      'onProjectEvent',
+      'onProjectListChanged',
     ]) {
       expect(typeof api[method]).toBe('function');
     }
   });
 
-  test('runScript / stopScript invoke the correct IPC channels', () => {
+  test('project methods invoke the correct IPC channels', () => {
     mockInvoke.mockClear();
-    exposed.api.runScript({ command: 'npm start' });
-    expect(mockInvoke).toHaveBeenCalledWith('script:run', { command: 'npm start' });
 
-    mockInvoke.mockClear();
-    exposed.api.stopScript(123);
-    expect(mockInvoke).toHaveBeenCalledWith('script:stop', 123);
+    exposed.api.listProjects();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:list');
+
+    exposed.api.inspectDirectory('/tmp/demo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:inspectDirectory', '/tmp/demo');
+
+    exposed.api.validateProjectDraft({ name: 'Demo' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:validateDraft', { name: 'Demo' });
+
+    exposed.api.diagnoseProjectDraft({ name: 'Demo' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:diagnoseDraft', { name: 'Demo' });
+
+    exposed.api.createProject({ name: 'Demo' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:create', { name: 'Demo' });
+
+    exposed.api.updateProject('p1', { name: 'Renamed' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:update', 'p1', { name: 'Renamed' });
+
+    exposed.api.deleteProject('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:delete', 'p1');
+
+    exposed.api.startProject('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:start', 'p1');
+
+    exposed.api.stopProject('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:stop', 'p1');
+
+    exposed.api.restartProject('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:restart', 'p1');
+
+    exposed.api.openProject('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:open', 'p1');
+
+    exposed.api.discoverScripts('/tmp/demo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:discoverScripts', '/tmp/demo');
+
+    exposed.api.suggestPort(3000);
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:suggestPort', 3000);
+
+    exposed.api.checkProjectPort(3000);
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:checkPort', 3000);
+
+    exposed.api.clearProjectLogs('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:clearLogs', 'p1');
+
+    exposed.api.copyProjectLogs('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:copyLogs', 'p1');
+
+    exposed.api.applyDoctorAction('p1', 'sync-url-to-port');
+    expect(mockInvoke).toHaveBeenLastCalledWith(
+      'project:applyDoctorAction',
+      'p1',
+      'sync-url-to-port'
+    );
+
+    exposed.api.copyDoctorReport('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:copyDoctorReport', 'p1');
+
+    exposed.api.revealProjectDirectory('p1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:revealDirectory', 'p1');
   });
 
-  test('onScriptOutput subscribes and returns an unsubscribe function', () => {
+  test('subscriptions forward payloads and return unsubscribe functions', () => {
     mockOn.mockClear();
     mockRemoveListener.mockClear();
     const cb = jest.fn();
-    const unsubscribe = exposed.api.onScriptOutput(cb);
-    expect(mockOn).toHaveBeenCalledWith('script:output', expect.any(Function));
+    const unsubscribe = exposed.api.onProjectEvent(cb);
+    expect(mockOn).toHaveBeenCalledWith('project:event', expect.any(Function));
 
-    // The registered listener should forward the event payload to the callback.
     const listener = mockOn.mock.calls[0][1];
-    listener({}, { pid: 1, line: 'hello' });
-    expect(cb).toHaveBeenCalledWith({ pid: 1, line: 'hello' });
+    listener({}, { projectId: 'p1', type: 'state' });
+    expect(cb).toHaveBeenCalledWith({ projectId: 'p1', type: 'state' });
 
     unsubscribe();
-    expect(mockRemoveListener).toHaveBeenCalledWith('script:output', listener);
+    expect(mockRemoveListener).toHaveBeenCalledWith('project:event', listener);
   });
 });

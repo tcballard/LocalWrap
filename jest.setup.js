@@ -19,39 +19,50 @@ jest.mock('electron', () => ({
     quit: jest.fn(),
     isReady: jest.fn().mockReturnValue(true),
     getVersion: jest.fn().mockReturnValue('1.0.0'),
-    requestSingleInstanceLock: jest.fn().mockReturnValue(true)
+    requestSingleInstanceLock: jest.fn().mockReturnValue(true),
   },
   BrowserWindow: jest.fn().mockImplementation(() => ({
     loadURL: jest.fn(),
+    loadFile: jest.fn(),
     on: jest.fn(),
     webContents: {
       on: jest.fn(),
-      setWindowOpenHandler: jest.fn()
+      setWindowOpenHandler: jest.fn(),
+      getURL: jest.fn().mockReturnValue('file:///app.html'),
+      send: jest.fn(),
     },
     show: jest.fn(),
     hide: jest.fn(),
     close: jest.fn(),
+    focus: jest.fn(),
+    isVisible: jest.fn().mockReturnValue(true),
+    isMinimized: jest.fn().mockReturnValue(false),
+    restore: jest.fn(),
     isDestroyed: jest.fn().mockReturnValue(false),
     setTitle: jest.fn(),
-    once: jest.fn()
+    once: jest.fn(),
   })),
   Menu: {
-    buildFromTemplate: jest.fn().mockReturnValue({})
+    buildFromTemplate: jest.fn().mockReturnValue({}),
   },
   Tray: jest.fn().mockImplementation(() => ({
     setContextMenu: jest.fn(),
     setToolTip: jest.fn(),
-    on: jest.fn()
+    on: jest.fn(),
   })),
   shell: {
-    openExternal: jest.fn()
+    openExternal: jest.fn(),
+    openPath: jest.fn(),
   },
   dialog: {
     showMessageBox: jest.fn(),
-    showErrorBox: jest.fn()
+    showErrorBox: jest.fn(),
+  },
+  clipboard: {
+    writeText: jest.fn(),
   },
   nativeImage: {
     createFromPath: jest.fn().mockReturnValue({}),
-    createEmpty: jest.fn().mockReturnValue({})
-  }
-})); 
+    createEmpty: jest.fn().mockReturnValue({}),
+  },
+}));

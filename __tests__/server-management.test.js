@@ -1,84 +1,160 @@
-// Test server management functionality
-describe('Server Management', () => {
-  // Mock server management functions
-  const servers = new Map();
+const { EventEmitter } = require('events');
+const { ProjectLifecycle } = require('../lib/projectLifecycle');
 
-  const getServersStatus = () => {
-    const status = {};
-    for (const [port, server] of servers.entries()) {
-      status[port] = {
-        running: server && !server.destroyed,
-        port: port,
-        uptime: server ? Date.now() - server.startTime : 0
-      };
-    }
-    return status;
+function createFakeChild(pid = 1234) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.kill = jest.fn(() => {
+    setImmediate(() => child.emit('close', 0));
+    return true;
+  });
+  return child;
+}
+
+function createProject(overrides = {}) {
+  return {
+    id: 'project-1',
+    name: 'Demo',
+    cwd: __dirname,
+    command: 'node --version',
+    port: 3000,
+    url: 'http://localhost:3000',
+    openOnReady: false,
+    ...overrides,
   };
+}
 
-  const getServerStatus = (port) => {
-    const server = servers.get(port);
-    if (!server) {
-      return { running: false, port, error: 'Server not found' };
-    }
-    return {
-      running: !server.destroyed,
-      port: port,
-      uptime: Date.now() - server.startTime
-    };
-  };
+describe('ProjectLifecycle', () => {
+  test('starts a project, records output, and marks it ready', async () => {
+    const events = [];
+    let onLine;
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn((options) => {
+        onLine = options.onLine;
+        return createFakeChild();
+      }),
+      waitForReady: jest.fn(() => Promise.resolve(true)),
+      now: () => '2026-06-05T00:00:00.000Z',
+    });
+    lifecycle.on('event', (event) => events.push(event));
 
-  beforeEach(() => {
-    servers.clear();
+    await lifecycle.start(createProject());
+    onLine('compiled');
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const state = lifecycle.getState('project-1');
+    expect(state.status).toBe('ready');
+    expect(state.pid).toBe(1234);
+    expect(state.readinessMessage).toBe('Project is ready.');
+    expect(state.diagnosis).toMatchObject({
+      status: 'ready',
+      summary: 'Project is ready.',
+    });
+    expect(state.diagnosisTimeline.map((event) => event.message)).toContain(
+      'http://localhost:3000 responded.'
+    );
+    expect(state.logs).toContain('compiled');
+    expect(state.logs).toContain('[ready] http://localhost:3000');
+    expect(events.some((event) => event.type === 'output')).toBe(true);
   });
 
-  test('should return empty status when no servers are running', () => {
-    const status = getServersStatus();
-    expect(status).toEqual({});
+  test('marks a running project as unresponsive when readiness times out', async () => {
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => createFakeChild()),
+      waitForReady: jest.fn(() => Promise.resolve(false)),
+    });
+
+    await lifecycle.start(createProject());
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const state = lifecycle.getState('project-1');
+    expect(state.status).toBe('running-unresponsive');
+    expect(state.readinessMessage).toMatch(/did not respond/);
+    expect(state.diagnosis).toMatchObject({
+      status: 'attention',
+      summary: 'Project is running but the URL is not responding.',
+    });
+    expect(state.logs.join('\n')).toMatch(/running-unresponsive/);
   });
 
-  test('should return server status for running servers', () => {
-    // Mock a running server
-    const mockServer = {
-      destroyed: false,
-      startTime: Date.now() - 5000 // 5 seconds ago
-    };
-    servers.set(3000, mockServer);
+  test('marks spawn failures as failed', async () => {
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => {
+        throw new Error('spawn failed');
+      }),
+    });
 
-    const status = getServersStatus();
-    expect(status[3000]).toBeDefined();
-    expect(status[3000].running).toBe(true);
-    expect(status[3000].port).toBe(3000);
-    expect(status[3000].uptime).toBeGreaterThan(0);
+    await expect(lifecycle.start(createProject())).rejects.toThrow(/spawn failed/);
+    expect(lifecycle.getState('project-1')).toMatchObject({
+      status: 'failed',
+      error: 'spawn failed',
+      readinessMessage: 'Project failed to start.',
+      diagnosis: {
+        status: 'failed',
+        summary: 'Project failed to start.',
+      },
+    });
   });
 
-  test('should return correct status for specific server', () => {
-    const mockServer = {
-      destroyed: false,
-      startTime: Date.now() - 3000
-    };
-    servers.set(8080, mockServer);
+  test('preserves exit metadata and clears logs', async () => {
+    let onExit;
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn((options) => {
+        onExit = options.onExit;
+        return createFakeChild();
+      }),
+      waitForReady: jest.fn(() => new Promise(() => {})),
+      now: () => '2026-06-06T00:00:00.000Z',
+    });
 
-    const status = getServerStatus(8080);
-    expect(status.running).toBe(true);
-    expect(status.port).toBe(8080);
-    expect(status.uptime).toBeGreaterThan(0);
+    await lifecycle.start(createProject());
+    lifecycle.appendLog('project-1', 'hello');
+    onExit(1);
+
+    expect(lifecycle.getState('project-1')).toMatchObject({
+      status: 'stopped',
+      lastExitCode: 1,
+      lastStoppedAt: '2026-06-06T00:00:00.000Z',
+      diagnosis: {
+        status: 'failed',
+        summary: 'Process exited with code 1.',
+      },
+    });
+
+    lifecycle.clearLogs('project-1');
+    expect(lifecycle.getState('project-1').logs).toEqual([]);
   });
 
-  test('should return error for non-existent server', () => {
-    const status = getServerStatus(9999);
-    expect(status.running).toBe(false);
-    expect(status.port).toBe(9999);
-    expect(status.error).toBe('Server not found');
+  test('stops a running project by killing the process tree', async () => {
+    const child = createFakeChild();
+    const killProcessTree = jest.fn(async () => {
+      setImmediate(() => child.emit('close', 0));
+    });
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => child),
+      waitForReady: jest.fn(() => new Promise(() => {})),
+      killProcessTree,
+    });
+
+    await lifecycle.start(createProject());
+    await lifecycle.stop('project-1');
+
+    expect(killProcessTree).toHaveBeenCalledWith(child);
+    expect(lifecycle.getState('project-1').status).toBe('stopped');
   });
 
-  test('should handle stopped servers', () => {
-    const mockServer = {
-      destroyed: true,
-      startTime: Date.now() - 1000
-    };
-    servers.set(4000, mockServer);
+  test('opens a project automatically when readiness succeeds', async () => {
+    const openProject = jest.fn();
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => createFakeChild()),
+      waitForReady: jest.fn(() => Promise.resolve(true)),
+      openProject,
+    });
 
-    const status = getServerStatus(4000);
-    expect(status.running).toBe(false);
+    const project = createProject({ openOnReady: true });
+    await lifecycle.start(project);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(openProject).toHaveBeenCalledWith(project);
   });
-}); 
+});

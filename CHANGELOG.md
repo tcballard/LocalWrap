@@ -5,6 +5,72 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] - 2026-06-06
+
+### Added
+
+- Project Doctor panel above logs with compact checks for directory, command,
+  dependencies, port, URL, process start, and readiness.
+- Non-persisted diagnosis timeline and Doctor report copying for saved projects.
+- Safe Doctor actions for finding a free port, syncing URL to port, revealing
+  the project folder, and revealing the launch command.
+- Dependency-free sample project under `examples/sample-project` for demos and
+  manual LocalWrap smoke tests.
+
+### Changed
+
+- Project start now runs Doctor preflight first; validation errors block start,
+  while warnings remain advisory.
+- Runtime state now carries diagnosis details for ready, failed,
+  running-but-unresponsive, stopped, and exited processes.
+
+## [2.4.0] - 2026-06-06
+
+### Added
+
+- Guided project import: choose a directory first, then LocalWrap inspects
+  package scripts and suggests a name, command, port, and local URL.
+- Inline project draft validation with field-level errors and warnings for
+  missing directories, invalid commands, invalid URLs, port mismatches, and busy
+  ports.
+- Clearer runtime states for ready, failed, and running-but-unresponsive
+  projects.
+- Log controls for clearing, copying, and revealing the command attached to the
+  selected project.
+- More useful tray actions, including stop-all and per-running-project controls.
+
+### Changed
+
+- Reworked the first-run empty state around a single Add Project action.
+- `Start` and `Save` now stay disabled until project details are valid; `Open` is
+  strongest only when a project is ready.
+
+## [2.3.0] - 2026-06-05
+
+### Added
+
+- Project launcher workflow: save local projects with directory, command, port,
+  app URL, autostart, and open-on-ready preferences.
+- IPC-only project actions for create/update/delete/start/stop/restart/open,
+  with live bounded logs and readiness tracking.
+- Package script discovery for selected project directories, preferring common
+  scripts like `dev`, `start`, `preview`, and `serve`.
+
+### Changed
+
+- The Electron UI now loads from `public/app.html` with a CSP meta tag instead
+  of being served by a localhost Express control server.
+- Replaced the server-control panel with a project dashboard and per-project log
+  view.
+- Refactored core behavior into importable modules for project storage, process
+  lifecycle, port checks, readiness polling, URL validation, and script discovery.
+- CI now checks Prettier formatting, and Jest is configured to avoid Watchman.
+
+### Removed
+
+- Removed the browser-accessible mutating localhost server-management API and the
+  no-longer-needed Express/Helmet/rate-limit runtime dependencies.
+
 ## [2.2.0] - 2026-06-03
 
 ### Added
