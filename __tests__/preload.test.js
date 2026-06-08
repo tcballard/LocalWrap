@@ -36,7 +36,7 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('2.5.1');
+    expect(api.version).toBe('2.6.0');
 
     for (const method of [
       'listProjects',

@@ -21,7 +21,7 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.5.1',
+  version: '2.6.0',
   platform: 'desktop',
   isElectron: true,
 
