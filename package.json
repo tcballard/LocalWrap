@@ -1,6 +1,6 @@
 {
   "name": "localwrap",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Secure desktop launcher for local development projects",
   "main": "main.js",
   "scripts": {
@@ -85,6 +85,7 @@
     },
     "mac": {
       "icon": "assets/icon.icns",
+      "identity": "-",
       "target": [
         {
           "target": "dmg",

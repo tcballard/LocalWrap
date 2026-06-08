@@ -37,6 +37,7 @@ jobs:
         run: npm run build -- --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The installers are unsigned; skip signing so CI doesn't fail looking
-          # for certificates. Add real signing creds here later if you buy certs.
+          # Do not auto-discover paid signing certificates in CI. macOS bundles
+          # are ad-hoc signed via package.json so Gatekeeper sees a sealed app;
+          # add real signing/notarization credentials here later if you buy certs.
           CSC_IDENTITY_AUTO_DISCOVERY: false
