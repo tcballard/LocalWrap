@@ -1,5 +1,6 @@
 const {
   app,
+  BrowserView,
   BrowserWindow,
   Menu,
   Tray,
@@ -30,6 +31,8 @@ let mainWindow;
 let tray;
 let projectStore;
 let projectLifecycle;
+let previewView;
+let previewProjectId;
 
 function getProjectsFilePath() {
   return path.join(app.getPath('userData'), 'projects.json');
@@ -84,6 +87,164 @@ function openProject(project) {
     throw new Error('Project URL must be local.');
   }
   shell.openExternal(project.url);
+}
+
+function isWebURL(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch (_error) {
+    return false;
+  }
+}
+
+function emitPreviewEvent(payload) {
+  sendToRenderer('preview:event', {
+    projectId: previewProjectId,
+    ...payload,
+  });
+}
+
+function normalizePreviewBounds(bounds = {}) {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    throw new Error('Preview window is unavailable.');
+  }
+
+  const contentBounds = mainWindow.getContentBounds();
+  const x = Math.max(0, Math.floor(Number(bounds.x) || 0));
+  const y = Math.max(0, Math.floor(Number(bounds.y) || 0));
+  const width = Math.floor(Number(bounds.width) || 0);
+  const height = Math.floor(Number(bounds.height) || 0);
+  const clampedWidth = Math.max(0, Math.min(width, contentBounds.width - x));
+  const clampedHeight = Math.max(0, Math.min(height, contentBounds.height - y));
+
+  if (clampedWidth < 120 || clampedHeight < 80) {
+    throw new Error('Preview area is too small.');
+  }
+
+  return {
+    x,
+    y,
+    width: clampedWidth,
+    height: clampedHeight,
+  };
+}
+
+function handlePreviewNavigation(event, navigationUrl) {
+  if (validateLocalProjectURL(navigationUrl)) {
+    return;
+  }
+
+  event.preventDefault();
+  if (isWebURL(navigationUrl)) {
+    shell.openExternal(navigationUrl);
+  }
+}
+
+function createPreviewView() {
+  const view = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
+  });
+
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    if (validateLocalProjectURL(url)) {
+      view.webContents.loadURL(url);
+    } else if (isWebURL(url)) {
+      shell.openExternal(url);
+    }
+
+    return { action: 'deny' };
+  });
+
+  view.webContents.on('will-navigate', handlePreviewNavigation);
+  view.webContents.on('will-redirect', handlePreviewNavigation);
+  view.webContents.on('did-start-loading', () => emitPreviewEvent({ status: 'loading' }));
+  view.webContents.on('did-finish-load', () =>
+    emitPreviewEvent({ status: 'ready', url: view.webContents.getURL() })
+  );
+  view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+    if (errorCode === -3) {
+      return;
+    }
+
+    emitPreviewEvent({
+      status: 'failed',
+      url: validatedURL,
+      message: errorDescription,
+    });
+  });
+  view.webContents.on('did-navigate', (_event, url) => emitPreviewEvent({ status: 'ready', url }));
+
+  return view;
+}
+
+function closeProjectPreview(projectId = null) {
+  if (projectId && previewProjectId !== projectId) {
+    return false;
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed() && previewView) {
+    mainWindow.setBrowserView(null);
+  }
+
+  if (previewView && !previewView.webContents.isDestroyed()) {
+    previewView.webContents.close();
+  }
+
+  previewView = null;
+  previewProjectId = null;
+  return true;
+}
+
+function previewProject(project, bounds) {
+  if (!validateLocalProjectURL(project.url)) {
+    throw new Error('Project URL must be local.');
+  }
+
+  const runtime = serializeRuntime(project.id);
+  if (runtime.status !== 'ready') {
+    throw new Error('Project must be ready before previewing it in LocalWrap.');
+  }
+
+  const normalizedBounds = normalizePreviewBounds(bounds);
+  if (!previewView || previewView.webContents.isDestroyed()) {
+    previewView = createPreviewView();
+  }
+
+  previewProjectId = project.id;
+  mainWindow.setBrowserView(previewView);
+  previewView.setBounds(normalizedBounds);
+  previewView.setAutoResize({ width: false, height: false });
+  previewView.webContents.loadURL(project.url);
+
+  return {
+    projectId: project.id,
+    url: project.url,
+  };
+}
+
+function resizeProjectPreview(bounds) {
+  if (!previewView || previewView.webContents.isDestroyed()) {
+    return false;
+  }
+
+  previewView.setBounds(normalizePreviewBounds(bounds));
+  return true;
+}
+
+function reloadProjectPreview() {
+  if (!previewView || previewView.webContents.isDestroyed()) {
+    return false;
+  }
+
+  previewView.webContents.reloadIgnoringCache();
+  return true;
 }
 
 function revealProjectDirectory(project) {
@@ -151,6 +312,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    closeProjectPreview();
     mainWindow = null;
   });
 }
@@ -395,6 +557,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('project:delete', async (_event, projectId) => {
+    closeProjectPreview(projectId);
     await projectLifecycle.stop(projectId);
     projectStore.delete(projectId);
     emitProjectListChanged();
@@ -409,6 +572,7 @@ function registerIpcHandlers() {
   });
 
   ipcMain.handle('project:stop', async (_event, projectId) => {
+    closeProjectPreview(projectId);
     const state = await projectLifecycle.stop(projectId);
     emitProjectListChanged();
     return state;
@@ -416,6 +580,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('project:restart', async (_event, projectId) => {
     const project = getProjectOrThrow(projectId);
+    closeProjectPreview(projectId);
     const state = await projectLifecycle.restart(project);
     emitProjectListChanged();
     return state;
@@ -426,6 +591,17 @@ function registerIpcHandlers() {
     openProject(project);
     return true;
   });
+
+  ipcMain.handle('project:preview', (_event, projectId, bounds) => {
+    const project = getProjectOrThrow(projectId);
+    return previewProject(project, bounds);
+  });
+
+  ipcMain.handle('project:previewResize', (_event, bounds) => resizeProjectPreview(bounds));
+
+  ipcMain.handle('project:previewReload', () => reloadProjectPreview());
+
+  ipcMain.handle('project:previewClose', () => closeProjectPreview());
 
   ipcMain.handle('project:clearLogs', (_event, projectId) => {
     const state = projectLifecycle.clearLogs(projectId);

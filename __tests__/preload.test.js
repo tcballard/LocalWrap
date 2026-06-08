@@ -36,7 +36,7 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('2.5.0');
+    expect(api.version).toBe('2.5.1');
 
     for (const method of [
       'listProjects',
@@ -50,6 +50,10 @@ describe('preload contextBridge API', () => {
       'stopProject',
       'restartProject',
       'openProject',
+      'previewProject',
+      'resizeProjectPreview',
+      'reloadProjectPreview',
+      'closeProjectPreview',
       'discoverScripts',
       'suggestPort',
       'checkProjectPort',
@@ -62,6 +66,7 @@ describe('preload contextBridge API', () => {
       'getCurrentDirectory',
       'onProjectEvent',
       'onProjectListChanged',
+      'onPreviewEvent',
     ]) {
       expect(typeof api[method]).toBe('function');
     }
@@ -102,6 +107,28 @@ describe('preload contextBridge API', () => {
 
     exposed.api.openProject('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:open', 'p1');
+
+    exposed.api.previewProject('p1', { x: 10, y: 20, width: 300, height: 200 });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:preview', 'p1', {
+      x: 10,
+      y: 20,
+      width: 300,
+      height: 200,
+    });
+
+    exposed.api.resizeProjectPreview({ x: 12, y: 24, width: 320, height: 220 });
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:previewResize', {
+      x: 12,
+      y: 24,
+      width: 320,
+      height: 220,
+    });
+
+    exposed.api.reloadProjectPreview();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:previewReload');
+
+    exposed.api.closeProjectPreview();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:previewClose');
 
     exposed.api.discoverScripts('/tmp/demo');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:discoverScripts', '/tmp/demo');

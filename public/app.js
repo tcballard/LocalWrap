@@ -38,6 +38,15 @@
     validationSeq: 0,
     validationTimer: null,
     commandVisible: false,
+    previewVisible: false,
+    previewProjectId: null,
+    previewUrl: '',
+    previewStatus: 'idle',
+    previewResizeObserver: null,
+    collapsedSections: {
+      setup: false,
+      doctor: false,
+    },
     elements: {},
   };
 
@@ -236,6 +245,8 @@
   }
 
   function setSelected(projectId) {
+    resetPreviewState();
+    closePreviewInMain();
     state.selectedId = projectId;
     state.draft = null;
     state.scripts = [];
@@ -251,6 +262,49 @@
     scheduleValidation(0);
   }
 
+  function sectionButtonText(collapsed) {
+    return collapsed ? 'Expand' : 'Collapse';
+  }
+
+  function sectionButtonIcon(collapsed) {
+    return collapsed ? '▸' : '▾';
+  }
+
+  function renderSetup(project) {
+    const collapsed = state.collapsedSections.setup;
+    state.elements.setupPanel.classList.toggle('collapsed', collapsed);
+    state.elements.setupFields.hidden = collapsed;
+    state.elements.toggleSetupBtn.innerHTML = `<span class="btn-icon">${sectionButtonIcon(
+      collapsed
+    )}</span>${sectionButtonText(collapsed)}`;
+
+    if (!project) {
+      state.elements.setupSummary.textContent = 'Directory, command, and URL';
+      return;
+    }
+
+    const formProject = readFormProject();
+    state.elements.setupSummary.textContent = `${formProject.command || 'No command'} | ${
+      formProject.url || getAutoUrl(formProject.port)
+    }`;
+  }
+
+  function toggleSection(section) {
+    state.collapsedSections[section] = !state.collapsedSections[section];
+    const project = selectedProject();
+    if (section === 'setup') {
+      renderSetup(project);
+    }
+    if (section === 'doctor') {
+      renderDoctor(project);
+    }
+    if (section === 'setup' || section === 'doctor') {
+      window.requestAnimationFrame(() => {
+        syncPreviewBounds().catch(showError);
+      });
+    }
+  }
+
   async function loadProjects(projects) {
     if (Array.isArray(projects)) {
       state.projects = projects.map(normalizeProjectForView);
@@ -263,6 +317,16 @@
       (!state.selectedId || !state.projects.some((project) => project.id === state.selectedId))
     ) {
       state.selectedId = state.projects[0]?.id || null;
+    }
+
+    if (state.previewProjectId) {
+      const previewProject = state.projects.find(
+        (project) => project.id === state.previewProjectId
+      );
+      if (!previewProject || previewProject.runtime?.status !== 'ready') {
+        resetPreviewState();
+        closePreviewInMain();
+      }
     }
 
     render();
@@ -337,6 +401,7 @@
     state.elements.autostartInput.checked = Boolean(project.autostart);
     state.elements.openOnReadyInput.checked = Boolean(project.openOnReady);
 
+    renderSetup(project);
     renderScripts();
     renderRuntime(project);
     applyValidationMessages();
@@ -386,9 +451,15 @@
 
   function renderDoctor(project) {
     const diagnosis = diagnosisForProject(project);
-    state.elements.doctorPanel.className = `doctor ${diagnosis.status || 'idle'}`;
+    const collapsed = state.collapsedSections.doctor;
+    state.elements.doctorPanel.className = `doctor ${diagnosis.status || 'idle'}${
+      collapsed ? ' collapsed' : ''
+    }`;
     state.elements.doctorSummary.textContent = diagnosis.summary || 'Not checked yet.';
     state.elements.doctorTimeline.textContent = latestTimelineText(diagnosis);
+    state.elements.toggleDoctorBtn.innerHTML = `<span class="btn-icon">${sectionButtonIcon(
+      collapsed
+    )}</span>${sectionButtonText(collapsed)}`;
     state.elements.copyDoctorReportBtn.disabled = isDoctorActionDisabled('copy-report', project);
     state.elements.revealProjectDirBtn.disabled = isDoctorActionDisabled(
       'reveal-directory',
@@ -437,6 +508,7 @@
     const runtime = project.runtime || { status: 'stopped', logs: [] };
     const logs = runtime.logs && runtime.logs.length > 0 ? runtime.logs : ['No output yet.'];
 
+    renderPreview(project);
     renderDoctor(project);
     state.elements.statusBadge.className = `badge ${runtime.status || 'stopped'}`;
     state.elements.statusBadge.textContent = statusLabel(runtime.status);
@@ -452,6 +524,63 @@
     });
     state.elements.terminal.scrollTop = state.elements.terminal.scrollHeight;
     updateActionState();
+  }
+
+  function resetPreviewState() {
+    state.previewVisible = false;
+    state.previewProjectId = null;
+    state.previewUrl = '';
+    state.previewStatus = 'idle';
+  }
+
+  function previewBounds() {
+    const viewport = state.elements.previewViewport;
+    if (!viewport || state.elements.previewPanel.hidden) {
+      return null;
+    }
+
+    const rect = viewport.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  }
+
+  async function syncPreviewBounds() {
+    if (!state.previewVisible || !state.api?.resizeProjectPreview) {
+      return;
+    }
+
+    const bounds = previewBounds();
+    if (!bounds || bounds.width < 120 || bounds.height < 80) {
+      return;
+    }
+
+    await state.api.resizeProjectPreview(bounds);
+  }
+
+  function renderPreview(project) {
+    const visible = Boolean(state.previewVisible && project && !project.isDraft);
+    state.elements.previewPanel.hidden = !visible;
+
+    if (!visible) {
+      return;
+    }
+
+    state.elements.previewUrlLabel.textContent =
+      state.previewUrl || project.url || getAutoUrl(project.port);
+    state.elements.previewPlaceholder.textContent =
+      state.previewStatus === 'failed' ? 'Preview failed.' : 'Loading...';
+    state.elements.previewPlaceholder.hidden = state.previewStatus === 'ready';
+    state.elements.reloadPreviewBtn.disabled = !state.previewVisible;
+    state.elements.openPreviewExternalBtn.disabled = !state.previewVisible;
+    state.elements.closePreviewBtn.disabled = !state.previewVisible;
+
+    window.requestAnimationFrame(() => {
+      syncPreviewBounds().catch(showError);
+    });
   }
 
   function renderScripts() {
@@ -585,6 +714,7 @@
     state.elements.restartProjectBtn.disabled =
       !saved || !valid || dirty || project.runtime.status === 'stopping';
     state.elements.openProjectBtn.disabled = !saved || !ready;
+    state.elements.previewProjectBtn.disabled = !saved || !ready;
     state.elements.copyLogsBtn.disabled = !saved;
     state.elements.clearLogsBtn.disabled = !saved;
     state.elements.revealCommandBtn.disabled = !project;
@@ -668,6 +798,10 @@
     const cwd = await state.api.selectDirectory();
     if (!cwd) return;
 
+    resetPreviewState();
+    closePreviewInMain();
+    state.collapsedSections.setup = false;
+    state.collapsedSections.doctor = false;
     const profile = await state.api.inspectDirectory(cwd);
     state.draft = createDefaultDraft(profile);
     state.selectedId = null;
@@ -742,6 +876,7 @@
     if (!window.confirm(`Delete ${project.name}?`)) return;
 
     try {
+      resetPreviewState();
       await state.api.deleteProject(project.id);
       state.selectedId = null;
       state.validation = null;
@@ -776,11 +911,94 @@
     };
 
     try {
+      if (actionName === 'stopProject' || actionName === 'restartProject') {
+        resetPreviewState();
+      }
       await state.api[actionName](project.id);
       setStatus(`${labels[actionName]} ${project.name}.`);
     } catch (error) {
       showError(error);
     }
+  }
+
+  function closePreviewInMain() {
+    if (state.api?.closeProjectPreview) {
+      state.api.closeProjectPreview().catch(showError);
+    }
+  }
+
+  async function openPreview() {
+    const project = selectedProject();
+    if (!project || project.isDraft) return;
+
+    const validation = await validateCurrentDraft({ silent: true });
+    if (!validation.valid) {
+      setStatus('Fix project details before previewing.', 'error');
+      return;
+    }
+
+    if (isFormDirty()) {
+      setStatus('Save changes before previewing.', 'error');
+      return;
+    }
+
+    if (project.runtime?.status !== 'ready') {
+      setStatus('Preview is available when the project is ready.', 'error');
+      return;
+    }
+
+    state.previewVisible = true;
+    state.previewProjectId = project.id;
+    state.previewUrl = project.url;
+    state.previewStatus = 'loading';
+    state.collapsedSections.setup = true;
+    state.collapsedSections.doctor = true;
+    renderRuntime(project);
+    renderSetup(project);
+
+    await new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+    const bounds = previewBounds();
+    if (!bounds) {
+      resetPreviewState();
+      renderRuntime(project);
+      setStatus('Preview area is unavailable.', 'error');
+      return;
+    }
+
+    try {
+      await state.api.previewProject(project.id, bounds);
+      setStatus(`Previewing ${project.name}.`);
+    } catch (error) {
+      resetPreviewState();
+      renderRuntime(project);
+      showError(error);
+    }
+  }
+
+  async function closePreview({ silent = false } = {}) {
+    const wasVisible = state.previewVisible;
+    resetPreviewState();
+    renderRuntime(selectedProject() || createDefaultDraft());
+
+    if (state.api?.closeProjectPreview) {
+      await state.api.closeProjectPreview();
+    }
+
+    if (wasVisible && !silent) {
+      setStatus('Closed preview.');
+    }
+  }
+
+  async function reloadPreview() {
+    if (!state.previewVisible || !state.api?.reloadProjectPreview) {
+      return;
+    }
+
+    state.previewStatus = 'loading';
+    renderPreview(selectedProject());
+    await state.api.reloadProjectPreview();
+    setStatus('Reloaded preview.');
   }
 
   async function clearLogs() {
@@ -885,6 +1103,7 @@
 
   function handleFormChange() {
     updateCommandReveal();
+    renderSetup(selectedProject());
     scheduleValidation();
     updateActionState();
     updateDraftNotice();
@@ -909,6 +1128,7 @@
     state.elements.saveProjectBtn.addEventListener('click', saveProject);
     state.elements.deleteProjectBtn.addEventListener('click', deleteProject);
     state.elements.refreshBtn.addEventListener('click', () => loadProjects().catch(showError));
+    state.elements.toggleSetupBtn.addEventListener('click', () => toggleSection('setup'));
     state.elements.browseDirBtn.addEventListener('click', () => browseDirectory().catch(showError));
     state.elements.startProjectBtn.addEventListener('click', () =>
       runProjectAction('startProject')
@@ -918,6 +1138,16 @@
       runProjectAction('restartProject')
     );
     state.elements.openProjectBtn.addEventListener('click', () => runProjectAction('openProject'));
+    state.elements.previewProjectBtn.addEventListener('click', () =>
+      openPreview().catch(showError)
+    );
+    state.elements.reloadPreviewBtn.addEventListener('click', () =>
+      reloadPreview().catch(showError)
+    );
+    state.elements.openPreviewExternalBtn.addEventListener('click', () =>
+      runProjectAction('openProject')
+    );
+    state.elements.closePreviewBtn.addEventListener('click', () => closePreview().catch(showError));
     state.elements.clearLogsBtn.addEventListener('click', () => clearLogs().catch(showError));
     state.elements.copyLogsBtn.addEventListener('click', () => copyLogs().catch(showError));
     state.elements.revealCommandBtn.addEventListener('click', toggleCommandReveal);
@@ -927,6 +1157,7 @@
     state.elements.revealProjectDirBtn.addEventListener('click', () =>
       handleDoctorAction('reveal-directory').catch(showError)
     );
+    state.elements.toggleDoctorBtn.addEventListener('click', () => toggleSection('doctor'));
     state.elements.doctorChecks.addEventListener('click', (event) => {
       const button = event.target.closest('[data-doctor-action]');
       if (!button || button.disabled) return;
@@ -960,6 +1191,10 @@
       'saveProjectBtn',
       'deleteProjectBtn',
       'refreshBtn',
+      'setupPanel',
+      'setupSummary',
+      'setupFields',
+      'toggleSetupBtn',
       'nameField',
       'nameMessage',
       'cwdField',
@@ -983,6 +1218,14 @@
       'stopProjectBtn',
       'restartProjectBtn',
       'openProjectBtn',
+      'previewProjectBtn',
+      'previewPanel',
+      'previewUrlLabel',
+      'previewViewport',
+      'previewPlaceholder',
+      'reloadPreviewBtn',
+      'openPreviewExternalBtn',
+      'closePreviewBtn',
       'revealCommandBtn',
       'copyLogsBtn',
       'clearLogsBtn',
@@ -993,6 +1236,7 @@
       'doctorTimeline',
       'copyDoctorReportBtn',
       'revealProjectDirBtn',
+      'toggleDoctorBtn',
       'statusBadge',
       'pidLabel',
       'readinessLabel',
@@ -1016,9 +1260,30 @@
       renderProjectList();
       const project = selectedProject();
       if (project && project.id === event.projectId) {
+        if (state.previewProjectId === event.projectId && event.state?.status !== 'ready') {
+          resetPreviewState();
+        }
         renderRuntime(project);
       }
     });
+
+    if (state.api.onPreviewEvent) {
+      state.api.onPreviewEvent((event) => {
+        if (!state.previewVisible || event.projectId !== state.previewProjectId) {
+          return;
+        }
+
+        state.previewStatus = event.status || state.previewStatus;
+        if (event.url) {
+          state.previewUrl = event.url;
+        }
+        renderPreview(selectedProject());
+
+        if (event.status === 'failed') {
+          setStatus(`Preview failed: ${event.message || 'Unable to load URL.'}`, 'error');
+        }
+      });
+    }
   }
 
   async function init() {
@@ -1033,6 +1298,15 @@
     state.elements.versionLabel.textContent = `v${state.api.version}`;
     wireControls();
     subscribeToEvents();
+    if (window.ResizeObserver && state.elements.previewViewport) {
+      state.previewResizeObserver = new ResizeObserver(() => {
+        syncPreviewBounds().catch(showError);
+      });
+      state.previewResizeObserver.observe(state.elements.previewViewport);
+    }
+    window.addEventListener('resize', () => {
+      syncPreviewBounds().catch(showError);
+    });
     await loadProjects();
   }
 

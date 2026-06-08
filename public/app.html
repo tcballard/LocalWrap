@@ -17,7 +17,7 @@
 
       body {
         min-height: 100vh;
-        padding: 12px;
+        padding: 8px;
         background: #d8d8d8;
         color: #111;
         font-family: 'Segoe UI', Tahoma, Arial, sans-serif;
@@ -33,7 +33,7 @@
       .window {
         display: flex;
         flex-direction: column;
-        min-height: calc(100vh - 24px);
+        min-height: calc(100vh - 16px);
         border: 1px solid #4d4d4d;
         background: #f0f0f0;
         box-shadow:
@@ -45,8 +45,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
-        min-height: 26px;
-        padding: 4px 8px;
+        min-height: 24px;
+        padding: 3px 8px;
         background: linear-gradient(to bottom, #1479d4 0%, #064a9d 100%);
         color: #fff;
       }
@@ -63,7 +63,7 @@
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
-        padding: 8px;
+        padding: 6px;
         border-bottom: 1px solid #8a8a8a;
         background: #ececec;
       }
@@ -112,9 +112,9 @@
         grid-template-columns: 12px minmax(0, 1fr);
         gap: 6px;
         width: 100%;
-        min-height: 48px;
-        margin-bottom: 5px;
-        padding: 6px;
+        min-height: 42px;
+        margin-bottom: 4px;
+        padding: 5px;
         border: 1px solid #a1a1a1;
         background: #fff;
         color: #111;
@@ -184,22 +184,53 @@
         display: none;
       }
 
+      .setup {
+        border-bottom: 1px solid #8a8a8a;
+        background: #f0f0f0;
+      }
+
+      .section-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        min-height: 30px;
+        padding: 5px 8px;
+        border-bottom: 1px solid #c5c5c5;
+        background: #ececec;
+      }
+
+      .section-title {
+        color: #003c74;
+        font-weight: 600;
+      }
+
+      .section-summary {
+        margin-left: 8px;
+        color: #555;
+        font-size: 11px;
+      }
+
       .form {
         display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
-        gap: 10px;
-        padding: 10px;
-        border-bottom: 1px solid #8a8a8a;
+        gap: 7px;
+        padding: 7px;
+      }
+
+      .form[hidden] {
+        display: none;
       }
 
       .group-box {
         display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
         grid-column: span 12;
-        gap: 8px;
+        gap: 6px;
         min-width: 0;
         min-inline-size: 0;
-        padding: 10px 8px 8px;
+        padding: 8px 7px 7px;
         border: 1px solid #9a9a9a;
         background: #f5f5f5;
       }
@@ -225,7 +256,7 @@
       .field input,
       .field select {
         width: 100%;
-        height: 25px;
+        height: 23px;
         border: 1px inset #f0f0f0;
         padding: 3px 5px;
         background: #fff;
@@ -244,7 +275,7 @@
       }
 
       .field-message {
-        min-height: 13px;
+        min-height: 11px;
         color: #666;
         font-size: 10px;
       }
@@ -260,7 +291,7 @@
       .notice {
         display: none;
         grid-column: span 12;
-        min-height: 24px;
+        min-height: 22px;
         align-items: center;
         padding: 5px 7px;
         border: 1px solid #d1b44c;
@@ -355,9 +386,9 @@
       }
 
       .btn {
-        min-width: 78px;
-        height: 25px;
-        padding: 3px 10px;
+        min-width: 72px;
+        height: 23px;
+        padding: 2px 8px;
         border: 1px outset #f0f0f0;
         background: #f0f0f0;
         color: #111;
@@ -388,12 +419,70 @@
 
       .runtime {
         display: grid;
-        grid-template-rows: auto auto auto minmax(0, 1fr);
+        grid-template-rows: auto auto auto auto minmax(0, 1fr);
         min-height: 0;
+        overflow: hidden;
+      }
+
+      .preview {
+        margin: 6px 8px 0;
+        border: 1px solid #9a9a9a;
+        background: #f7f7f7;
+        box-shadow:
+          1px 1px 0 #fff inset,
+          -1px -1px 0 #d2d2d2 inset;
+      }
+
+      .preview[hidden] {
+        display: none;
+      }
+
+      .preview-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 7px;
+        border-bottom: 1px solid #c5c5c5;
+      }
+
+      .preview-title {
+        color: #003c74;
+        font-weight: 600;
+      }
+
+      .preview-url {
+        margin-left: 8px;
+        color: #333;
+      }
+
+      .preview-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .preview-viewport {
+        position: relative;
+        height: clamp(180px, 30vh, 300px);
+        min-height: 180px;
+        margin: 6px;
+        border: 1px inset #f0f0f0;
+        background: #fff;
+        overflow: hidden;
+      }
+
+      .preview-placeholder {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #666;
       }
 
       .doctor {
-        margin: 10px 10px 0;
+        margin: 6px 8px 0;
         border: 1px solid #9a9a9a;
         background: #f7f7f7;
         box-shadow:
@@ -407,7 +496,7 @@
         gap: 8px;
         align-items: center;
         justify-content: space-between;
-        padding: 7px 8px;
+        padding: 5px 7px;
         border-bottom: 1px solid #c5c5c5;
       }
 
@@ -431,16 +520,16 @@
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 1px;
-        padding: 6px;
+        padding: 5px;
       }
 
       .doctor-row {
         display: grid;
         grid-template-columns: 34px 92px minmax(0, 1fr) auto;
-        gap: 6px;
+        gap: 5px;
         align-items: center;
-        min-height: 27px;
-        padding: 3px 4px;
+        min-height: 24px;
+        padding: 2px 4px;
         border: 1px solid transparent;
         background: #fff;
       }
@@ -487,10 +576,15 @@
       }
 
       .doctor-timeline {
-        min-height: 22px;
-        padding: 4px 8px 7px;
+        min-height: 20px;
+        padding: 3px 7px 5px;
         color: #555;
         font-size: 11px;
+      }
+
+      .doctor.collapsed .doctor-checks,
+      .doctor.collapsed .doctor-timeline {
+        display: none;
       }
 
       .runtime-header {
@@ -499,7 +593,7 @@
         gap: 8px;
         align-items: center;
         justify-content: space-between;
-        padding: 8px 10px;
+        padding: 6px 8px;
         border-bottom: 1px solid #b5b5b5;
       }
 
@@ -549,7 +643,7 @@
       }
 
       .command-reveal {
-        margin: 8px 10px 0;
+        margin: 6px 8px 0;
         border: 1px inset #f0f0f0;
         background: #fff;
         padding: 6px;
@@ -565,7 +659,7 @@
 
       .terminal {
         min-height: 0;
-        margin: 10px;
+        margin: 6px 8px 8px;
         border: 1px inset #f0f0f0;
         background: #050505;
         color: #31ff31;
@@ -677,6 +771,10 @@
         .doctor-checks {
           grid-template-columns: 1fr;
         }
+
+        .preview-viewport {
+          height: 220px;
+        }
       }
     </style>
   </head>
@@ -718,103 +816,141 @@
           </div>
 
           <section class="detail" id="projectDetail" hidden>
-            <div class="form">
-              <div class="notice" id="draftNotice"></div>
-
-              <fieldset class="group-box">
-                <legend>Project</legend>
-                <div class="field span-4" id="nameField">
-                  <label for="nameInput">Name</label>
-                  <input type="text" id="nameInput" autocomplete="off" />
-                  <div class="field-message" id="nameMessage"></div>
+            <div class="setup" id="setupPanel">
+              <div class="section-header">
+                <div>
+                  <span class="section-title">Project Setup</span>
+                  <span class="section-summary" id="setupSummary">Directory, command, and URL</span>
                 </div>
+                <button class="btn" id="toggleSetupBtn">
+                  <span class="btn-icon">▾</span>Collapse
+                </button>
+              </div>
 
-                <div class="field span-8" id="cwdField">
-                  <label for="cwdInput">Directory</label>
-                  <div class="inline-field">
-                    <div class="field">
-                      <input type="text" id="cwdInput" readonly />
+              <div class="form" id="setupFields">
+                <div class="notice" id="draftNotice"></div>
+
+                <fieldset class="group-box">
+                  <legend>Project</legend>
+                  <div class="field span-4" id="nameField">
+                    <label for="nameInput">Name</label>
+                    <input type="text" id="nameInput" autocomplete="off" />
+                    <div class="field-message" id="nameMessage"></div>
+                  </div>
+
+                  <div class="field span-8" id="cwdField">
+                    <label for="cwdInput">Directory</label>
+                    <div class="inline-field">
+                      <div class="field">
+                        <input type="text" id="cwdInput" readonly />
+                      </div>
+                      <button class="btn" id="browseDirBtn">
+                        <span class="btn-icon">▣</span>Browse
+                      </button>
                     </div>
-                    <button class="btn" id="browseDirBtn">
-                      <span class="btn-icon">▣</span>Browse
+                    <div class="field-message" id="cwdMessage"></div>
+                  </div>
+                </fieldset>
+
+                <fieldset class="group-box">
+                  <legend>Launch</legend>
+                  <div class="field span-5" id="commandField">
+                    <label for="commandInput">Command</label>
+                    <input
+                      type="text"
+                      id="commandInput"
+                      autocomplete="off"
+                      placeholder="npm run dev"
+                    />
+                    <div class="field-message" id="commandMessage"></div>
+                  </div>
+
+                  <div class="field span-3">
+                    <label for="scriptSelect">Package Script</label>
+                    <select id="scriptSelect">
+                      <option value="">None found</option>
+                    </select>
+                  </div>
+
+                  <div class="field span-2" id="portField">
+                    <label for="portInput">Port</label>
+                    <input type="number" id="portInput" min="1000" max="65535" value="3000" />
+                    <div class="field-message" id="portMessage"></div>
+                  </div>
+
+                  <div class="field span-4" id="urlField">
+                    <label for="urlInput">App URL</label>
+                    <input
+                      type="text"
+                      id="urlInput"
+                      autocomplete="off"
+                      placeholder="http://localhost:3000"
+                    />
+                    <div class="field-message" id="urlMessage"></div>
+                  </div>
+
+                  <div class="actions span-8">
+                    <button class="btn primary" id="startProjectBtn">
+                      <span class="btn-icon">▶</span>Start
+                    </button>
+                    <button class="btn" id="stopProjectBtn">
+                      <span class="btn-icon">■</span>Stop
+                    </button>
+                    <button class="btn" id="restartProjectBtn">
+                      <span class="btn-icon">↻</span>Restart
+                    </button>
+                    <button class="btn" id="openProjectBtn">
+                      <span class="btn-icon">↗</span>Open
+                    </button>
+                    <button class="btn" id="previewProjectBtn">
+                      <span class="btn-icon">▣</span>Preview
                     </button>
                   </div>
-                  <div class="field-message" id="cwdMessage"></div>
-                </div>
-              </fieldset>
+                </fieldset>
 
-              <fieldset class="group-box">
-                <legend>Launch</legend>
-                <div class="field span-5" id="commandField">
-                  <label for="commandInput">Command</label>
-                  <input
-                    type="text"
-                    id="commandInput"
-                    autocomplete="off"
-                    placeholder="npm run dev"
-                  />
-                  <div class="field-message" id="commandMessage"></div>
-                </div>
-
-                <div class="field span-3">
-                  <label for="scriptSelect">Package Script</label>
-                  <select id="scriptSelect">
-                    <option value="">None found</option>
-                  </select>
-                </div>
-
-                <div class="field span-2" id="portField">
-                  <label for="portInput">Port</label>
-                  <input type="number" id="portInput" min="1000" max="65535" value="3000" />
-                  <div class="field-message" id="portMessage"></div>
-                </div>
-
-                <div class="field span-4" id="urlField">
-                  <label for="urlInput">App URL</label>
-                  <input
-                    type="text"
-                    id="urlInput"
-                    autocomplete="off"
-                    placeholder="http://localhost:3000"
-                  />
-                  <div class="field-message" id="urlMessage"></div>
-                </div>
-
-                <div class="actions span-8">
-                  <button class="btn primary" id="startProjectBtn">
-                    <span class="btn-icon">▶</span>Start
-                  </button>
-                  <button class="btn" id="stopProjectBtn">
-                    <span class="btn-icon">■</span>Stop
-                  </button>
-                  <button class="btn" id="restartProjectBtn">
-                    <span class="btn-icon">↻</span>Restart
-                  </button>
-                  <button class="btn" id="openProjectBtn">
-                    <span class="btn-icon">↗</span>Open
-                  </button>
-                </div>
-              </fieldset>
-
-              <fieldset class="group-box">
-                <legend>Options</legend>
-                <div class="field span-12">
-                  <label>Startup</label>
-                  <div class="checks">
-                    <label class="check">
-                      <input type="checkbox" id="autostartInput" />
-                      Autostart
-                    </label>
-                    <label class="check">
-                      <input type="checkbox" id="openOnReadyInput" />
-                      Open when ready
-                    </label>
+                <fieldset class="group-box">
+                  <legend>Options</legend>
+                  <div class="field span-12">
+                    <label>Startup</label>
+                    <div class="checks">
+                      <label class="check">
+                        <input type="checkbox" id="autostartInput" />
+                        Autostart
+                      </label>
+                      <label class="check">
+                        <input type="checkbox" id="openOnReadyInput" />
+                        Open when ready
+                      </label>
+                    </div>
                   </div>
-                </div>
-              </fieldset>
+                </fieldset>
+              </div>
             </div>
 
             <div class="runtime">
+              <div class="preview" id="previewPanel" hidden>
+                <div class="preview-header">
+                  <div>
+                    <span class="preview-title">Preview</span>
+                    <span class="preview-url" id="previewUrlLabel">http://localhost:3000</span>
+                  </div>
+                  <div class="preview-actions">
+                    <button class="btn" id="reloadPreviewBtn">
+                      <span class="btn-icon">↻</span>Reload
+                    </button>
+                    <button class="btn" id="openPreviewExternalBtn">
+                      <span class="btn-icon">↗</span>Browser
+                    </button>
+                    <button class="btn" id="closePreviewBtn">
+                      <span class="btn-icon">×</span>Close
+                    </button>
+                  </div>
+                </div>
+                <div class="preview-viewport" id="previewViewport">
+                  <div class="preview-placeholder" id="previewPlaceholder">Loading...</div>
+                </div>
+              </div>
+
               <div class="doctor" id="doctorPanel">
                 <div class="doctor-header">
                   <div>
@@ -827,6 +963,9 @@
                     </button>
                     <button class="btn" id="revealProjectDirBtn">
                       <span class="btn-icon">▣</span>Reveal Folder
+                    </button>
+                    <button class="btn" id="toggleDoctorBtn">
+                      <span class="btn-icon">▾</span>Collapse
                     </button>
                   </div>
                 </div>

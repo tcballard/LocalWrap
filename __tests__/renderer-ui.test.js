@@ -16,6 +16,8 @@ describe('renderer UI surface', () => {
   });
 
   test('project form is grouped into calm first-run sections', () => {
+    expect(html).toContain('id="setupPanel"');
+    expect(html).toContain('id="toggleSetupBtn"');
     expect(html).toContain('<legend>Project</legend>');
     expect(html).toContain('<legend>Launch</legend>');
     expect(html).toContain('<legend>Options</legend>');
@@ -34,6 +36,23 @@ describe('renderer UI surface', () => {
     }
   });
 
+  test('runtime area exposes an in-app preview surface', () => {
+    for (const id of [
+      'previewProjectBtn',
+      'previewPanel',
+      'previewViewport',
+      'reloadPreviewBtn',
+      'openPreviewExternalBtn',
+      'closePreviewBtn',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+
+    expect(html.indexOf('id="previewPanel"')).toBeLessThan(html.indexOf('id="doctorPanel"'));
+    expect(html).toContain('Preview');
+    expect(html).toContain('Browser');
+  });
+
   test('Project Doctor panel appears above logs with safe controls', () => {
     for (const id of [
       'doctorPanel',
@@ -42,6 +61,7 @@ describe('renderer UI surface', () => {
       'doctorTimeline',
       'copyDoctorReportBtn',
       'revealProjectDirBtn',
+      'toggleDoctorBtn',
     ]) {
       expect(html).toContain(`id="${id}"`);
     }

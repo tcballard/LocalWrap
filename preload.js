@@ -21,7 +21,7 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.5.0',
+  version: '2.5.1',
   platform: 'desktop',
   isElectron: true,
 
@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   stopProject: (projectId) => ipcRenderer.invoke('project:stop', projectId),
   restartProject: (projectId) => ipcRenderer.invoke('project:restart', projectId),
   openProject: (projectId) => ipcRenderer.invoke('project:open', projectId),
+  previewProject: (projectId, bounds) => ipcRenderer.invoke('project:preview', projectId, bounds),
+  resizeProjectPreview: (bounds) => ipcRenderer.invoke('project:previewResize', bounds),
+  reloadProjectPreview: () => ipcRenderer.invoke('project:previewReload'),
+  closeProjectPreview: () => ipcRenderer.invoke('project:previewClose'),
   discoverScripts: (workingDir) => ipcRenderer.invoke('project:discoverScripts', workingDir),
   suggestPort: (preferredPort) => ipcRenderer.invoke('project:suggestPort', preferredPort),
   checkProjectPort: (port) => ipcRenderer.invoke('project:checkPort', port),
@@ -51,4 +55,5 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
 
   onProjectEvent: (callback) => subscribe('project:event', callback),
   onProjectListChanged: (callback) => subscribe('project:list-changed', callback),
+  onPreviewEvent: (callback) => subscribe('preview:event', callback),
 });
