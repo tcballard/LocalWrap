@@ -131,7 +131,7 @@ const server = http.createServer((request, response) => {
 
 server.listen(port, 'localhost', () => {
   console.log(`[sample] LocalWrap sample project listening on http://localhost:${port}`);
-  console.log('[sample] Try importing examples/sample-project in LocalWrap.');
+  console.log('[sample] Try this through LocalWrap first launch or Add Project.');
 });
 
 function shutdown(signal) {

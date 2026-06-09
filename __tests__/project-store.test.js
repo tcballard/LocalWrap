@@ -75,6 +75,25 @@ describe('ProjectStore', () => {
     expect(updated.updatedAt).not.toBe(project.updatedAt);
   });
 
+  test('preserves optional sample project metadata', () => {
+    const store = createStore();
+    const project = store.create({
+      cwd: fixture.cwd,
+      command: 'npm run dev',
+      port: 3000,
+      url: 'http://localhost:3000',
+      isSample: true,
+    });
+
+    const updated = store.update(project.id, {
+      name: 'Demo Sample',
+    });
+
+    expect(project.isSample).toBe(true);
+    expect(updated.isSample).toBe(true);
+    expect(createStore().list()[0].isSample).toBe(true);
+  });
+
   test('rejects unsafe commands, missing directories, and non-local URLs', () => {
     const store = createStore();
     expect(() =>

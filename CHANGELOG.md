@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] - 2026-06-08
+
+### Added
+
+- First-launch **Try Sample Project** action when no projects are saved. It
+  copies the bundled sample into user data, saves it as a normal project, and
+  selects it without auto-starting, previewing, or opening a browser.
+- Packaged apps now bundle the dependency-free sample project as an Electron
+  Builder extra resource.
+
 ## [2.6.0] - 2026-06-08
 
 ### Added

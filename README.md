@@ -73,9 +73,14 @@ npm run dev        # launch with dev flag
 ## Demo Project
 
 This repo includes a dependency-free sample app at
-`examples/sample-project`. Import that folder in LocalWrap to test project
-inspection, start/stop/restart, readiness, logs, Project Doctor, and open-in-
-browser behavior without setting up another repo.
+`examples/sample-project`. On first launch, when no projects are saved, choose
+**Try Sample Project** to copy that app into LocalWrap's user data folder and
+save it as a normal project. LocalWrap selects it but does not start it
+automatically, so click **Start** to see Project Doctor, logs, readiness,
+**Preview**, and **Open**.
+
+When running from source, you can still use **Add Project** and import
+`examples/sample-project` manually.
 
 ## Build distributables
 

@@ -24,6 +24,7 @@ const {
 const { inspectProjectDirectory } = require('./lib/projectInspection');
 const { ACTIVE_STATUSES, ProjectLifecycle } = require('./lib/projectLifecycle');
 const { ProjectStore } = require('./lib/projectStore');
+const { createSampleProject } = require('./lib/sampleProject');
 const { validateProjectDraft } = require('./lib/projectValidation');
 const { validateLocalProjectURL } = require('./lib/urlValidation');
 
@@ -537,6 +538,19 @@ function registerIpcHandlers() {
       projectLifecycle.start(project).catch((error) => console.error('Autostart failed:', error));
     }
 
+    return serializeProject(project);
+  });
+
+  ipcMain.handle('project:createSample', async () => {
+    const project = await createSampleProject({
+      app,
+      appRoot: __dirname,
+      findAvailablePort,
+      inspectProjectDirectory,
+      projectStore,
+      resourcesPath: process.resourcesPath,
+    });
+    emitProjectListChanged();
     return serializeProject(project);
   });
 

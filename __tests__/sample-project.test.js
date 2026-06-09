@@ -16,4 +16,15 @@ describe('sample project', () => {
       'npm run preview',
     ]);
   });
+
+  test('is bundled into packaged apps as an extra resource', () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')
+    );
+
+    expect(packageJson.build.extraResources).toContainEqual({
+      from: 'examples/sample-project',
+      to: 'sample-project',
+    });
+  });
 });

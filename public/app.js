@@ -346,7 +346,7 @@
     if (state.projects.length === 0) {
       const empty = document.createElement('div');
       empty.className = 'project-subtitle';
-      empty.textContent = 'Use Add Project to import a folder';
+      empty.textContent = 'Try the sample or add a folder';
       list.appendChild(empty);
       return;
     }
@@ -820,6 +820,37 @@
     }
   }
 
+  async function createSampleProjectFromBundle() {
+    if (!state.api.createSampleProject) {
+      throw new Error('Sample project action is unavailable.');
+    }
+
+    const button = state.elements.emptySampleProjectBtn;
+    if (button) {
+      button.disabled = true;
+    }
+
+    try {
+      setStatus('Preparing sample project...');
+      resetPreviewState();
+      closePreviewInMain();
+      state.draft = null;
+      state.validation = null;
+      state.diagnosis = null;
+      state.commandVisible = false;
+
+      const sample = await state.api.createSampleProject();
+      await loadProjects();
+      setSelected(sample.id);
+      await validateCurrentDraft({ silent: true });
+      setStatus('Sample project ready. Click Start.');
+    } finally {
+      if (button) {
+        button.disabled = false;
+      }
+    }
+  }
+
   async function browseDirectory() {
     const cwd = await state.api.selectDirectory();
     if (!cwd) return;
@@ -1125,6 +1156,9 @@
     state.elements.emptyAddProjectBtn.addEventListener('click', () =>
       importProjectFromDirectory().catch(showError)
     );
+    state.elements.emptySampleProjectBtn.addEventListener('click', () =>
+      createSampleProjectFromBundle().catch(showError)
+    );
     state.elements.saveProjectBtn.addEventListener('click', saveProject);
     state.elements.deleteProjectBtn.addEventListener('click', deleteProject);
     state.elements.refreshBtn.addEventListener('click', () => loadProjects().catch(showError));
@@ -1187,6 +1221,7 @@
       'projectDetail',
       'addProjectBtn',
       'emptyAddProjectBtn',
+      'emptySampleProjectBtn',
       'draftNotice',
       'saveProjectBtn',
       'deleteProjectBtn',

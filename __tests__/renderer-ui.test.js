@@ -3,11 +3,26 @@ const path = require('path');
 
 describe('renderer UI surface', () => {
   const html = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.html'), 'utf8');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'public', 'app.js'), 'utf8');
 
-  test('first-run empty state has an Add Project action', () => {
+  test('first-run empty state has sample and add project actions', () => {
+    expect(html).toContain('id="emptySampleProjectBtn"');
     expect(html).toContain('id="emptyAddProjectBtn"');
     expect(html).toContain('class="empty-task"');
+    expect(html).toContain('Try Sample Project');
     expect(html).toContain('Add Project');
+    expect(html.indexOf('id="emptySampleProjectBtn"')).toBeLessThan(
+      html.indexOf('id="emptyAddProjectBtn"')
+    );
+    expect(html).toContain('class="btn primary" id="emptySampleProjectBtn"');
+    expect(html).toContain('class="btn" id="emptyAddProjectBtn"');
+  });
+
+  test('sample action calls preload and selects the created project', () => {
+    expect(js).toContain('state.api.createSampleProject');
+    expect(js).toContain('const sample = await state.api.createSampleProject();');
+    expect(js).toContain('setSelected(sample.id);');
+    expect(js).toContain('Sample project ready. Click Start.');
   });
 
   test('hidden detail panel stays out of the first-run layout', () => {

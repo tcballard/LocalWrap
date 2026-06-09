@@ -699,6 +699,13 @@
         font-weight: 600;
       }
 
+      .empty-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+      }
+
       .empty.visible {
         display: flex;
       }
@@ -782,7 +789,7 @@
     <div class="window">
       <div class="titlebar">
         <div class="titlebar-title">LocalWrap</div>
-        <div class="titlebar-meta" id="versionLabel">v2.5</div>
+        <div class="titlebar-meta" id="versionLabel">v2.7</div>
       </div>
 
       <div class="toolbar">
@@ -809,9 +816,14 @@
           <div class="empty visible" id="emptyState">
             <div class="empty-task">
               <div class="empty-title">No projects saved</div>
-              <button class="btn primary" id="emptyAddProjectBtn">
-                <span class="btn-icon">+</span>Add Project
-              </button>
+              <div class="empty-actions">
+                <button class="btn primary" id="emptySampleProjectBtn">
+                  <span class="btn-icon">▣</span>Try Sample Project
+                </button>
+                <button class="btn" id="emptyAddProjectBtn">
+                  <span class="btn-icon">+</span>Add Project
+                </button>
+              </div>
             </div>
           </div>
 

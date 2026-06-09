@@ -39,7 +39,7 @@ describe('renderer view-model helpers', () => {
     expect(renderer.isProjectActive(next[1])).toBe(true);
   });
 
-  test('labels v2.5 runtime states clearly', () => {
+  test('labels current runtime states clearly', () => {
     expect(renderer.statusLabel('running-unresponsive')).toBe('Running, no response');
     expect(renderer.statusLabel('failed')).toBe('Failed');
     expect(renderer.isProjectActive({ runtime: { status: 'running' } })).toBe(true);

@@ -1,6 +1,6 @@
 {
   "name": "localwrap",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Secure desktop launcher for local development projects",
   "main": "main.js",
   "scripts": {
@@ -77,6 +77,12 @@
       "node_modules/**/*",
       "!node_modules/**/test/**/*",
       "!node_modules/**/*.d.ts"
+    ],
+    "extraResources": [
+      {
+        "from": "examples/sample-project",
+        "to": "sample-project"
+      }
     ],
     "win": {
       "target": "nsis",

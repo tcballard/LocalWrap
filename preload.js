@@ -21,7 +21,7 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.6.0',
+  version: '2.7.0',
   platform: 'desktop',
   isElectron: true,
 
@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   validateProjectDraft: (draft) => ipcRenderer.invoke('project:validateDraft', draft),
   diagnoseProjectDraft: (draft) => ipcRenderer.invoke('project:diagnoseDraft', draft),
   createProject: (project) => ipcRenderer.invoke('project:create', project),
+  createSampleProject: () => ipcRenderer.invoke('project:createSample'),
   updateProject: (projectId, patch) => ipcRenderer.invoke('project:update', projectId, patch),
   deleteProject: (projectId) => ipcRenderer.invoke('project:delete', projectId),
   startProject: (projectId) => ipcRenderer.invoke('project:start', projectId),

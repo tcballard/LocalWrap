@@ -36,7 +36,7 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('2.6.0');
+    expect(api.version).toBe('2.7.0');
 
     for (const method of [
       'listProjects',
@@ -44,6 +44,7 @@ describe('preload contextBridge API', () => {
       'validateProjectDraft',
       'diagnoseProjectDraft',
       'createProject',
+      'createSampleProject',
       'updateProject',
       'deleteProject',
       'startProject',
@@ -89,6 +90,9 @@ describe('preload contextBridge API', () => {
 
     exposed.api.createProject({ name: 'Demo' });
     expect(mockInvoke).toHaveBeenLastCalledWith('project:create', { name: 'Demo' });
+
+    exposed.api.createSampleProject();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:createSample');
 
     exposed.api.updateProject('p1', { name: 'Renamed' });
     expect(mockInvoke).toHaveBeenLastCalledWith('project:update', 'p1', { name: 'Renamed' });
