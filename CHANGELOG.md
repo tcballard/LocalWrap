@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- The app version shown in the UI is now sourced from the main process
+  (`package.json`) instead of a hardcoded copy in the preload script.
+- Command validation also rejects `%`, `^`, and quote characters, closing
+  cmd.exe expansion/escaping tricks on the Windows (shell) spawn path.
+- CI now runs the test suite on Windows and macOS in addition to Linux, so
+  platform-specific process handling is exercised before release time.
+
+### Removed
+
+- Dead code: the unused `dir:current` IPC channel / `getCurrentDirectory`
+  preload API, the inert `new-window` handler (the event was removed in
+  Electron 22; `setWindowOpenHandler` already governs window opening), and the
+  phantom `running` runtime status in the renderer (the lifecycle never emits
+  it).
+
 ## [2.7.0] - 2026-06-08
 
 ### Added
