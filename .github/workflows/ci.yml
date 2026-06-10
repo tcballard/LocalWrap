@@ -8,7 +8,13 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Tests run on every OS because the process code has win32-specific paths
+    # (shell spawning, taskkill) that otherwise only run at release time.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
 
@@ -19,14 +25,18 @@ jobs:
 
       - run: npm ci
 
+      # Lint, formatting, and audit are platform-independent; run them once.
       - run: npm run lint
+        if: matrix.os == 'ubuntu-latest'
 
       - run: npm run format:check
+        if: matrix.os == 'ubuntu-latest'
 
       - run: npm test
 
       # Surface high-severity advisories without blocking unrelated PRs.
       # Dependabot opens the actual fix PRs (see .github/dependabot.yml).
       - name: Security audit
+        if: matrix.os == 'ubuntu-latest'
         run: npm audit --audit-level=high
         continue-on-error: true
