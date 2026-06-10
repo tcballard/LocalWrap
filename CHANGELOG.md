@@ -36,6 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `public/shared-constants.js`, used by both the renderer and the main
   process, instead of hand-mirrored copies.
 
+### Added
+
+- End-to-end smoke test (`npm run test:e2e`, Playwright) that launches the
+  real app with an isolated config dir, creates the sample project, starts
+  it, waits for readiness, and stops it. Runs in CI on Linux.
+
 ### Removed
 
 - Dead code: the unused `dir:current` IPC channel / `getCurrentDirectory`

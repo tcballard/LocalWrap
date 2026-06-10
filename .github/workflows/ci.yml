@@ -40,3 +40,21 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm audit --audit-level=high
         continue-on-error: true
+
+  e2e:
+    runs-on: ubuntu-latest
+    # Informational while the smoke test proves itself stable; remove this
+    # once it has been green for a while to make it a required gate.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Packaged-app smoke test
+        run: xvfb-run --auto-servernum npm run test:e2e

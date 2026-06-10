@@ -69,6 +69,16 @@ module.exports = [
     },
   },
 
+  // End-to-end tests (Playwright + Node).
+  {
+    files: ['e2e/**/*.js', 'playwright.config.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
+    },
+  },
+
   // Turn off stylistic rules that conflict with Prettier.
   prettier,
 ];
