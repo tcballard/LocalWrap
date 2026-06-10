@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events');
-const { ProjectLifecycle } = require('../lib/projectLifecycle');
+const { ProjectLifecycle, killProcessTree } = require('../lib/projectLifecycle');
 
 function createFakeChild(pid = 1234) {
   const child = new EventEmitter();
@@ -156,5 +156,59 @@ describe('ProjectLifecycle', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(openProject).toHaveBeenCalledWith(project);
+  });
+});
+
+// These tests pin the CURRENT stop behavior for processes that ignore
+// SIGTERM, so the kill-escalation fix can flip them deliberately. Today the
+// state claims "stopped" after a 5s grace period even if the process never
+// exited and is still holding its port.
+describe('stop with a SIGTERM-ignoring process (pins current behavior)', () => {
+  const testOnPosix = process.platform === 'win32' ? test.skip : test;
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test('reports stopped after the grace period even though the process never exited', async () => {
+    const child = new EventEmitter();
+    child.pid = 4321;
+    child.kill = jest.fn(() => true); // signal delivered, process ignores it
+    const ignoredKill = jest.fn(async () => {});
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn(() => child),
+      waitForReady: jest.fn(() => new Promise(() => {})),
+      killProcessTree: ignoredKill,
+    });
+
+    await lifecycle.start(createProject());
+
+    jest.useFakeTimers();
+    const stopPromise = lifecycle.stop('project-1');
+    await Promise.resolve(); // let stop() reach the exit wait
+    jest.advanceTimersByTime(5000); // waitForChildExit gives up
+    await stopPromise;
+
+    expect(ignoredKill).toHaveBeenCalledWith(child);
+    // KNOWN GAP (audit C2, fixed by M1.2): the child never emitted exit or
+    // close, so the OS process is still alive, but the runtime claims it is
+    // stopped. The fix should report 'running-unresponsive' here instead.
+    const state = lifecycle.getState('project-1');
+    expect(state.status).toBe('stopped');
+    expect(state.pid).toBeNull();
+  });
+
+  testOnPosix('default killProcessTree sends a single SIGTERM and never escalates', async () => {
+    const killSpy = jest.spyOn(process, 'kill').mockImplementation(() => true);
+    try {
+      await killProcessTree({ pid: 4242, kill: jest.fn() });
+
+      // KNOWN GAP (audit C2, fixed by M1.2): one SIGTERM to the process
+      // group is the only delivery attempt; no SIGKILL escalation exists.
+      expect(killSpy).toHaveBeenCalledTimes(1);
+      expect(killSpy).toHaveBeenCalledWith(-4242, 'SIGTERM');
+    } finally {
+      killSpy.mockRestore();
+    }
   });
 });
