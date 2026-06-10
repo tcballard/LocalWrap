@@ -23,7 +23,7 @@ const {
 } = require('./lib/projectDoctor');
 const { inspectProjectDirectory } = require('./lib/projectInspection');
 const { ACTIVE_STATUSES, ProjectLifecycle } = require('./lib/projectLifecycle');
-const { ProjectStore } = require('./lib/projectStore');
+const { ProjectStore, isStoreCorruptError } = require('./lib/projectStore');
 const { createSampleProject } = require('./lib/sampleProject');
 const { validateProjectDraft } = require('./lib/projectValidation');
 const { validateLocalProjectURL } = require('./lib/urlValidation');
@@ -43,6 +43,75 @@ function createProjectStore() {
   return new ProjectStore({
     filePath: getProjectsFilePath(),
   });
+}
+
+/**
+ * Verify the saved projects file is readable before the app starts using it.
+ * On corruption, ask the user to restore the last-good backup or start fresh
+ * (the unreadable file is moved aside, never deleted). Returns false when the
+ * user chooses to quit instead; startup must stop in that case.
+ */
+function ensureProjectStoreReadable() {
+  for (;;) {
+    let error;
+    try {
+      projectStore.list();
+      return true;
+    } catch (caught) {
+      if (!isStoreCorruptError(caught)) {
+        throw caught;
+      }
+      error = caught;
+    }
+
+    const hasBackup = projectStore.hasBackup();
+    const buttons = hasBackup ? ['Restore Backup', 'Start Fresh', 'Quit'] : ['Start Fresh', 'Quit'];
+    const detailLines = [
+      error.message,
+      '',
+      hasBackup
+        ? 'Restore Backup brings back your projects from the last successful save.'
+        : 'No backup exists yet (backups are written on every save from now on).',
+      'Start Fresh keeps the unreadable file next to it for manual recovery and continues with an empty project list.',
+    ];
+
+    const choice = dialog.showMessageBoxSync({
+      type: 'error',
+      title: 'LocalWrap - Saved Projects Unreadable',
+      message: 'Your saved projects file could not be read.',
+      detail: detailLines.join('\n'),
+      buttons,
+      defaultId: 0,
+      cancelId: buttons.length - 1,
+      noLink: true,
+    });
+    const action = buttons[choice];
+
+    if (action === 'Quit') {
+      app.quit();
+      return false;
+    }
+
+    if (action === 'Restore Backup') {
+      try {
+        projectStore.restoreFromBackup();
+      } catch (restoreError) {
+        console.error('Backup restore failed:', restoreError);
+        dialog.showErrorBox(
+          'Restore failed',
+          `The backup could not be restored: ${restoreError.message}`
+        );
+      }
+      // Loop: re-check the store; on success we return true, on failure the
+      // dialog comes back (without a usable backup, Start Fresh remains).
+      continue;
+    }
+
+    const { preservedPath } = projectStore.startFresh();
+    if (preservedPath) {
+      console.error(`Unreadable projects file preserved at: ${preservedPath}`);
+    }
+  }
 }
 
 function serializeProject(project) {
@@ -428,8 +497,16 @@ function createTrayMenuTemplate() {
 }
 
 function refreshTray() {
-  if (tray) {
+  if (!tray) {
+    return;
+  }
+
+  // The menu reads the store; a mid-session read failure must not crash the
+  // lifecycle event handler that triggered the refresh.
+  try {
     tray.setContextMenu(Menu.buildFromTemplate(createTrayMenuTemplate()));
+  } catch (error) {
+    console.error('Failed to refresh tray menu:', error);
   }
 }
 
@@ -688,6 +765,10 @@ async function startAutostartProjects() {
 app.whenReady().then(async () => {
   try {
     projectStore = createProjectStore();
+    if (!ensureProjectStoreReadable()) {
+      return;
+    }
+
     projectLifecycle = new ProjectLifecycle({ openProject, checkPortAvailable, findAvailablePort });
     projectLifecycle.on('event', (event) => {
       sendToRenderer('project:event', event);

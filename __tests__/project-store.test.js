@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { ProjectStore } = require('../lib/projectStore');
+const { ProjectStore, isStoreCorruptError } = require('../lib/projectStore');
 
 function createFixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'localwrap-store-'));
@@ -125,11 +125,10 @@ describe('ProjectStore', () => {
   });
 });
 
-// These tests pin the store's CURRENT failure behavior so the durability fix
-// (atomic writes, backup, fail-closed reads) can flip them deliberately.
-// Today a corrupt or unreadable projects.json is silently treated as empty,
-// which means the next write permanently discards every saved project.
-describe('ProjectStore failure modes (pins current behavior)', () => {
+// Durability contract: an unreadable projects.json fails closed (typed
+// STORE_CORRUPT error) instead of being treated as empty, writes are atomic,
+// and every successful save mirrors the file to a .bak for recovery.
+describe('ProjectStore durability', () => {
   let fixture;
   let nextId;
 
@@ -161,19 +160,34 @@ describe('ProjectStore failure modes (pins current behavior)', () => {
     };
   }
 
-  test('treats a corrupt projects.json as empty instead of failing', () => {
+  function expectStoreCorrupt(callback) {
+    let caught;
+    try {
+      callback();
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeDefined();
+    expect(isStoreCorruptError(caught)).toBe(true);
+  }
+
+  test('a missing file still reads as an empty store', () => {
+    expect(createStore().list()).toEqual([]);
+  });
+
+  test('fails closed on a corrupt projects.json', () => {
     fs.writeFileSync(fixture.filePath, '{ this is not json');
 
-    expect(createStore().list()).toEqual([]);
+    expectStoreCorrupt(() => createStore().list());
   });
 
-  test('treats an unexpected document shape as empty', () => {
+  test('fails closed on an unexpected document shape', () => {
     fs.writeFileSync(fixture.filePath, JSON.stringify({ projects: { nope: true } }));
 
-    expect(createStore().list()).toEqual([]);
+    expectStoreCorrupt(() => createStore().list());
   });
 
-  test('treats a read error as empty instead of failing', () => {
+  test('fails closed on a read error', () => {
     createStore().create(createProjectInput('Survivor'));
 
     const readError = Object.assign(new Error('EBUSY: resource busy or locked'), {
@@ -188,25 +202,85 @@ describe('ProjectStore failure modes (pins current behavior)', () => {
       },
     });
 
-    expect(store.list()).toEqual([]);
+    expectStoreCorrupt(() => store.list());
   });
 
-  test('DATA LOSS: saving after a corrupt read silently discards all projects', () => {
+  test('refuses to save over an unreadable store instead of wiping it', () => {
     const store = createStore();
     store.create(createProjectInput('First'));
     store.create(createProjectInput('Second'));
     expect(store.list()).toHaveLength(2);
 
     // Simulate a crash mid-write / disk corruption.
+    const corruptContent = '{ this is not json';
+    fs.writeFileSync(fixture.filePath, corruptContent);
+
+    expectStoreCorrupt(() => store.create(createProjectInput('Third')));
+
+    // The unreadable file is left untouched for recovery.
+    expect(fs.readFileSync(fixture.filePath, 'utf8')).toBe(corruptContent);
+  });
+
+  test('writes atomically without leaving a temp file behind', () => {
+    createStore().create(createProjectInput('First'));
+
+    expect(fs.existsSync(`${fixture.filePath}.tmp`)).toBe(false);
+    expect(createStore().list()).toHaveLength(1);
+  });
+
+  test('mirrors every successful save to the backup file', () => {
+    const store = createStore();
+    store.create(createProjectInput('First'));
+    store.create(createProjectInput('Second'));
+
+    expect(store.hasBackup()).toBe(true);
+    const backup = JSON.parse(fs.readFileSync(`${fixture.filePath}.bak`, 'utf8'));
+    expect(backup.projects.map((project) => project.name)).toEqual(['First', 'Second']);
+  });
+
+  test('restoreFromBackup recovers all projects after corruption', () => {
+    const store = createStore();
+    store.create(createProjectInput('First'));
+    store.create(createProjectInput('Second'));
     fs.writeFileSync(fixture.filePath, '{ this is not json');
 
-    // KNOWN GAP (audit C1, fixed by M1.1): this create should refuse to run
-    // against an unreadable store; instead it reads [] and overwrites the
-    // file, silently destroying First and Second.
-    store.create(createProjectInput('Third'));
+    const restored = store.restoreFromBackup();
 
-    const survivors = createStore().list();
-    expect(survivors).toHaveLength(1);
-    expect(survivors[0].name).toBe('Third');
+    expect(restored.map((project) => project.name)).toEqual(['First', 'Second']);
+    expect(store.list().map((project) => project.name)).toEqual(['First', 'Second']);
+  });
+
+  test('restoreFromBackup fails closed when no backup exists', () => {
+    fs.writeFileSync(fixture.filePath, '{ this is not json');
+    const store = createStore();
+
+    expect(store.hasBackup()).toBe(false);
+    expectStoreCorrupt(() => store.restoreFromBackup());
+  });
+
+  test('restoreFromBackup fails closed when the backup is also unreadable', () => {
+    const store = createStore();
+    store.create(createProjectInput('First'));
+    fs.writeFileSync(fixture.filePath, '{ this is not json');
+    fs.writeFileSync(`${fixture.filePath}.bak`, '{ also not json');
+
+    expectStoreCorrupt(() => store.restoreFromBackup());
+  });
+
+  test('startFresh moves the unreadable file aside and empties the store', () => {
+    const store = createStore();
+    store.create(createProjectInput('First'));
+    const corruptContent = '{ this is not json';
+    fs.writeFileSync(fixture.filePath, corruptContent);
+
+    const { preservedPath } = store.startFresh();
+
+    expect(preservedPath).toMatch(/projects\.json\.corrupt-/);
+    expect(fs.readFileSync(preservedPath, 'utf8')).toBe(corruptContent);
+    expect(store.list()).toEqual([]);
+  });
+
+  test('startFresh is a no-op when no file exists', () => {
+    expect(createStore().startFresh()).toEqual({ preservedPath: null });
   });
 });

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Saved projects can no longer be silently wiped by a corrupt or unreadable
+  `projects.json`: reads now fail closed, saves are written atomically, and
+  every successful save keeps a `projects.json.bak`. If the file is ever
+  unreadable at launch, LocalWrap asks whether to restore the backup or start
+  fresh (the unreadable file is preserved alongside, never deleted).
+
 ### Changed
 
 - The app version shown in the UI is now sourced from the main process
