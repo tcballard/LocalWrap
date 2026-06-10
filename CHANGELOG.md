@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every successful save keeps a `projects.json.bak`. If the file is ever
   unreadable at launch, LocalWrap asks whether to restore the backup or start
   fresh (the unreadable file is preserved alongside, never deleted).
+- Stopping a project now escalates from SIGTERM to SIGKILL when the process
+  ignores the first signal, and the status only reports "Stopped" when the
+  process actually exited — a survivor is shown as "Running, no response" so
+  it can be stopped again instead of silently holding its port.
+- Stopping a project now cancels the readiness polling immediately instead of
+  letting it probe the URL for up to 30 more seconds.
+- Output and exit events from a previous run can no longer bleed into a
+  restarted project's logs and status.
 
 ### Changed
 
