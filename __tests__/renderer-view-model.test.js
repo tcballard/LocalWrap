@@ -42,8 +42,10 @@ describe('renderer view-model helpers', () => {
   test('labels current runtime states clearly', () => {
     expect(renderer.statusLabel('running-unresponsive')).toBe('Running, no response');
     expect(renderer.statusLabel('failed')).toBe('Failed');
-    expect(renderer.isProjectActive({ runtime: { status: 'running' } })).toBe(true);
+    expect(renderer.isProjectActive({ runtime: { status: 'starting' } })).toBe(true);
     expect(renderer.isProjectActive({ runtime: { status: 'running-unresponsive' } })).toBe(true);
+    // 'running' is not a status the lifecycle emits; it must not count as active.
+    expect(renderer.isProjectActive({ runtime: { status: 'running' } })).toBe(false);
   });
 
   test('preserves runtime diagnosis in project events', () => {

@@ -1,11 +1,6 @@
 (function () {
-  const ACTIVE_STATUSES = new Set([
-    'starting',
-    'running',
-    'ready',
-    'running-unresponsive',
-    'stopping',
-  ]);
+  // Must mirror ACTIVE_STATUSES in lib/projectLifecycle.js.
+  const ACTIVE_STATUSES = new Set(['starting', 'ready', 'running-unresponsive', 'stopping']);
   const AUTO_URL_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/;
   const FIELD_NAMES = ['name', 'cwd', 'command', 'port', 'url'];
   const DOCTOR_CHECKS = [
@@ -135,7 +130,6 @@
   function statusLabel(status) {
     const labels = {
       starting: 'Starting',
-      running: 'Running',
       ready: 'Ready',
       'running-unresponsive': 'Running, no response',
       stopping: 'Stopping',
