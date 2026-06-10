@@ -509,6 +509,11 @@ async function applyDoctorAction(projectId, actionId) {
 }
 
 function registerIpcHandlers() {
+  // Synchronous: the sandboxed preload reads this once while building its API.
+  ipcMain.on('app:version', (event) => {
+    event.returnValue = app.getVersion();
+  });
+
   ipcMain.handle('project:list', () => serializeProjects());
 
   ipcMain.handle('project:inspectDirectory', (_event, cwd) =>
@@ -667,8 +672,6 @@ function registerIpcHandlers() {
 
     return result.filePaths[0];
   });
-
-  ipcMain.handle('dir:current', () => process.cwd());
 }
 
 async function startAutostartProjects() {
@@ -750,15 +753,6 @@ app.on('certificate-error', (event, _webContents, url, _error, _certificate, cal
   } else {
     callback(false);
   }
-});
-
-app.on('web-contents-created', (_event, contents) => {
-  contents.on('new-window', (event, navigationUrl) => {
-    event.preventDefault();
-    if (validateLocalProjectURL(navigationUrl)) {
-      shell.openExternal(navigationUrl);
-    }
-  });
 });
 
 process.on('SIGTERM', () => {
