@@ -13,27 +13,23 @@ const {
 const fs = require('fs');
 const path = require('path');
 const { autoUpdater } = require('electron-updater');
-const { discoverPackageScripts } = require('./lib/packageScripts');
+const { clampPreviewBounds, createIpcHandlers } = require('./lib/ipcHandlers');
 const { checkPortAvailable, findAvailablePort } = require('./lib/portUtils');
-const {
-  ACTIONS: DOCTOR_ACTIONS,
-  buildDoctorReport,
-  diagnoseProjectDraft: runProjectDoctor,
-  getDoctorActionPatch,
-} = require('./lib/projectDoctor');
-const { inspectProjectDirectory } = require('./lib/projectInspection');
 const { ACTIVE_STATUSES, ProjectLifecycle } = require('./lib/projectLifecycle');
 const { ProjectStore, isStoreCorruptError } = require('./lib/projectStore');
-const { createSampleProject } = require('./lib/sampleProject');
-const { validateProjectDraft } = require('./lib/projectValidation');
 const { validateLocalProjectURL } = require('./lib/urlValidation');
 
 let mainWindow;
 let tray;
 let projectStore;
 let projectLifecycle;
-let previewView;
-let previewProjectId;
+let previewController;
+let ipcApi;
+
+// Lets tests isolate their own config directory; harmless otherwise.
+if (process.env.LOCALWRAP_USER_DATA) {
+  app.setPath('userData', process.env.LOCALWRAP_USER_DATA);
+}
 
 function getProjectsFilePath() {
   return path.join(app.getPath('userData'), 'projects.json');
@@ -114,33 +110,6 @@ function ensureProjectStoreReadable() {
   }
 }
 
-function serializeProject(project) {
-  return {
-    ...project,
-    runtime: projectLifecycle
-      ? projectLifecycle.getState(project.id)
-      : { status: 'stopped', logs: [] },
-  };
-}
-
-function serializeRuntime(projectId) {
-  return projectLifecycle
-    ? projectLifecycle.getState(projectId)
-    : { status: 'stopped', logs: [], diagnosis: null };
-}
-
-function serializeProjects() {
-  return projectStore.list().map(serializeProject);
-}
-
-function getProjectOrThrow(projectId) {
-  const project = projectStore.get(projectId);
-  if (!project) {
-    throw new Error('Project not found.');
-  }
-  return project;
-}
-
 function sendToRenderer(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send(channel, payload);
@@ -148,7 +117,7 @@ function sendToRenderer(channel, payload) {
 }
 
 function emitProjectListChanged() {
-  sendToRenderer('project:list-changed', serializeProjects());
+  sendToRenderer('project:list-changed', ipcApi.serializeProjects());
   refreshTray();
 }
 
@@ -168,160 +137,141 @@ function isWebURL(url) {
   }
 }
 
-function emitPreviewEvent(payload) {
-  sendToRenderer('preview:event', {
-    projectId: previewProjectId,
-    ...payload,
-  });
-}
+/**
+ * Owns the embedded preview surface (an Electron BrowserView attached to the
+ * main window). Project lookup and readiness checks happen in the IPC layer;
+ * this controller only does window mechanics.
+ */
+function createPreviewController() {
+  let previewView = null;
+  let previewProjectId = null;
 
-function normalizePreviewBounds(bounds = {}) {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    throw new Error('Preview window is unavailable.');
+  function emitPreviewEvent(payload) {
+    sendToRenderer('preview:event', {
+      projectId: previewProjectId,
+      ...payload,
+    });
   }
 
-  const contentBounds = mainWindow.getContentBounds();
-  const x = Math.max(0, Math.floor(Number(bounds.x) || 0));
-  const y = Math.max(0, Math.floor(Number(bounds.y) || 0));
-  const width = Math.floor(Number(bounds.width) || 0);
-  const height = Math.floor(Number(bounds.height) || 0);
-  const clampedWidth = Math.max(0, Math.min(width, contentBounds.width - x));
-  const clampedHeight = Math.max(0, Math.min(height, contentBounds.height - y));
-
-  if (clampedWidth < 120 || clampedHeight < 80) {
-    throw new Error('Preview area is too small.');
-  }
-
-  return {
-    x,
-    y,
-    width: clampedWidth,
-    height: clampedHeight,
-  };
-}
-
-function handlePreviewNavigation(event, navigationUrl) {
-  if (validateLocalProjectURL(navigationUrl)) {
-    return;
-  }
-
-  event.preventDefault();
-  if (isWebURL(navigationUrl)) {
-    shell.openExternal(navigationUrl);
-  }
-}
-
-function createPreviewView() {
-  const view = new BrowserView({
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      webSecurity: true,
-      allowRunningInsecureContent: false,
-    },
-  });
-
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    if (validateLocalProjectURL(url)) {
-      view.webContents.loadURL(url);
-    } else if (isWebURL(url)) {
-      shell.openExternal(url);
+  function normalizeBounds(bounds) {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      throw new Error('Preview window is unavailable.');
     }
 
-    return { action: 'deny' };
-  });
+    return clampPreviewBounds(bounds, mainWindow.getContentBounds());
+  }
 
-  view.webContents.on('will-navigate', handlePreviewNavigation);
-  view.webContents.on('will-redirect', handlePreviewNavigation);
-  view.webContents.on('did-start-loading', () => emitPreviewEvent({ status: 'loading' }));
-  view.webContents.on('did-finish-load', () =>
-    emitPreviewEvent({ status: 'ready', url: view.webContents.getURL() })
-  );
-  view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
-    if (errorCode === -3) {
+  function handlePreviewNavigation(event, navigationUrl) {
+    if (validateLocalProjectURL(navigationUrl)) {
       return;
     }
 
-    emitPreviewEvent({
-      status: 'failed',
-      url: validatedURL,
-      message: errorDescription,
+    event.preventDefault();
+    if (isWebURL(navigationUrl)) {
+      shell.openExternal(navigationUrl);
+    }
+  }
+
+  function createPreviewView() {
+    const view = new BrowserView({
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        webSecurity: true,
+        allowRunningInsecureContent: false,
+      },
     });
-  });
-  view.webContents.on('did-navigate', (_event, url) => emitPreviewEvent({ status: 'ready', url }));
 
-  return view;
-}
+    view.webContents.setWindowOpenHandler(({ url }) => {
+      if (validateLocalProjectURL(url)) {
+        view.webContents.loadURL(url);
+      } else if (isWebURL(url)) {
+        shell.openExternal(url);
+      }
 
-function closeProjectPreview(projectId = null) {
-  if (projectId && previewProjectId !== projectId) {
-    return false;
+      return { action: 'deny' };
+    });
+
+    view.webContents.on('will-navigate', handlePreviewNavigation);
+    view.webContents.on('will-redirect', handlePreviewNavigation);
+    view.webContents.on('did-start-loading', () => emitPreviewEvent({ status: 'loading' }));
+    view.webContents.on('did-finish-load', () =>
+      emitPreviewEvent({ status: 'ready', url: view.webContents.getURL() })
+    );
+    view.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
+      if (errorCode === -3) {
+        return;
+      }
+
+      emitPreviewEvent({
+        status: 'failed',
+        url: validatedURL,
+        message: errorDescription,
+      });
+    });
+    view.webContents.on('did-navigate', (_event, url) =>
+      emitPreviewEvent({ status: 'ready', url })
+    );
+
+    return view;
   }
 
-  if (mainWindow && !mainWindow.isDestroyed() && previewView) {
-    mainWindow.setBrowserView(null);
+  function close(projectId = null) {
+    if (projectId && previewProjectId !== projectId) {
+      return false;
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed() && previewView) {
+      mainWindow.setBrowserView(null);
+    }
+
+    if (previewView && !previewView.webContents.isDestroyed()) {
+      previewView.webContents.close();
+    }
+
+    previewView = null;
+    previewProjectId = null;
+    return true;
   }
 
-  if (previewView && !previewView.webContents.isDestroyed()) {
-    previewView.webContents.close();
+  function open(project, bounds) {
+    const normalizedBounds = normalizeBounds(bounds);
+    if (!previewView || previewView.webContents.isDestroyed()) {
+      previewView = createPreviewView();
+    }
+
+    previewProjectId = project.id;
+    mainWindow.setBrowserView(previewView);
+    previewView.setBounds(normalizedBounds);
+    previewView.setAutoResize({ width: false, height: false });
+    previewView.webContents.loadURL(project.url);
+
+    return {
+      projectId: project.id,
+      url: project.url,
+    };
   }
 
-  previewView = null;
-  previewProjectId = null;
-  return true;
-}
+  function resize(bounds) {
+    if (!previewView || previewView.webContents.isDestroyed()) {
+      return false;
+    }
 
-function previewProject(project, bounds) {
-  if (!validateLocalProjectURL(project.url)) {
-    throw new Error('Project URL must be local.');
+    previewView.setBounds(normalizeBounds(bounds));
+    return true;
   }
 
-  const runtime = serializeRuntime(project.id);
-  if (runtime.status !== 'ready') {
-    throw new Error('Project must be ready before previewing it in LocalWrap.');
+  function reload() {
+    if (!previewView || previewView.webContents.isDestroyed()) {
+      return false;
+    }
+
+    previewView.webContents.reloadIgnoringCache();
+    return true;
   }
 
-  const normalizedBounds = normalizePreviewBounds(bounds);
-  if (!previewView || previewView.webContents.isDestroyed()) {
-    previewView = createPreviewView();
-  }
-
-  previewProjectId = project.id;
-  mainWindow.setBrowserView(previewView);
-  previewView.setBounds(normalizedBounds);
-  previewView.setAutoResize({ width: false, height: false });
-  previewView.webContents.loadURL(project.url);
-
-  return {
-    projectId: project.id,
-    url: project.url,
-  };
-}
-
-function resizeProjectPreview(bounds) {
-  if (!previewView || previewView.webContents.isDestroyed()) {
-    return false;
-  }
-
-  previewView.setBounds(normalizePreviewBounds(bounds));
-  return true;
-}
-
-function reloadProjectPreview() {
-  if (!previewView || previewView.webContents.isDestroyed()) {
-    return false;
-  }
-
-  previewView.webContents.reloadIgnoringCache();
-  return true;
-}
-
-function revealProjectDirectory(project) {
-  if (!fs.existsSync(project.cwd) || !fs.statSync(project.cwd).isDirectory()) {
-    throw new Error('Project directory does not exist.');
-  }
-  return shell.openPath(project.cwd);
+  return { close, open, reload, resize };
 }
 
 function createWindow() {
@@ -382,7 +332,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
-    closeProjectPreview();
+    previewController.close();
     mainWindow = null;
   });
 }
@@ -409,7 +359,7 @@ function checkForUpdates({ silent = false } = {}) {
 }
 
 function createTrayMenuTemplate() {
-  const projects = projectStore ? serializeProjects() : [];
+  const projects = projectStore && ipcApi ? ipcApi.serializeProjects() : [];
   const activeProjects = projects.filter((project) => ACTIVE_STATUSES.has(project.runtime.status));
   const readyProjects = projects.filter((project) => project.runtime.status === 'ready');
 
@@ -544,211 +494,31 @@ function createTray() {
   });
 }
 
-function assertSafeProjectMutation(projectId, patch = {}) {
-  const project = getProjectOrThrow(projectId);
-  if (!projectLifecycle.isActive(projectId)) {
-    return;
-  }
-
-  for (const key of ['cwd', 'command', 'port', 'url']) {
-    if (Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== project[key]) {
-      throw new Error('Stop the project before changing its directory, command, port, or URL.');
-    }
-  }
-}
-
-async function applyDoctorAction(projectId, actionId) {
-  const project = getProjectOrThrow(projectId);
-
-  if (actionId === DOCTOR_ACTIONS.REVEAL_DIRECTORY) {
-    await revealProjectDirectory(project);
-    return serializeProject(project);
-  }
-
-  if (actionId === DOCTOR_ACTIONS.USE_FREE_PORT) {
-    const port = await findAvailablePort(project.port);
-    const patch = getDoctorActionPatch(project, actionId, { port });
-    assertSafeProjectMutation(projectId, patch);
-    const updated = projectStore.update(projectId, patch);
-    emitProjectListChanged();
-    return serializeProject(updated);
-  }
-
-  if (actionId === DOCTOR_ACTIONS.SYNC_URL_TO_PORT) {
-    const patch = getDoctorActionPatch(project, actionId);
-    assertSafeProjectMutation(projectId, patch);
-    const updated = projectStore.update(projectId, patch);
-    emitProjectListChanged();
-    return serializeProject(updated);
-  }
-
-  throw new Error(`Unknown Project Doctor action: ${actionId}`);
-}
-
 function registerIpcHandlers() {
-  // Synchronous: the sandboxed preload reads this once while building its API.
-  ipcMain.on('app:version', (event) => {
-    event.returnValue = app.getVersion();
+  ipcApi = createIpcHandlers({
+    app,
+    clipboard,
+    dialog,
+    shell,
+    projectStore,
+    projectLifecycle,
+    appRoot: __dirname,
+    resourcesPath: process.resourcesPath,
+    emitProjectListChanged,
+    getMainWindow: () => mainWindow,
+    openProject,
+    preview: previewController,
   });
 
-  ipcMain.handle('project:list', () => serializeProjects());
+  for (const [channel, handler] of Object.entries(ipcApi.invokeHandlers)) {
+    ipcMain.handle(channel, handler);
+  }
 
-  ipcMain.handle('project:inspectDirectory', (_event, cwd) =>
-    inspectProjectDirectory(cwd, {
-      findAvailablePort,
-    })
-  );
-
-  ipcMain.handle('project:validateDraft', (_event, draft) =>
-    validateProjectDraft(draft, {
-      checkPortAvailable,
-    })
-  );
-
-  ipcMain.handle('project:diagnoseDraft', (_event, draft) =>
-    runProjectDoctor(draft, {
-      checkPortAvailable,
-      findAvailablePort,
-    })
-  );
-
-  ipcMain.handle('project:create', async (_event, payload = {}) => {
-    const project = projectStore.create(payload);
-    emitProjectListChanged();
-
-    if (project.autostart) {
-      projectLifecycle.start(project).catch((error) => console.error('Autostart failed:', error));
-    }
-
-    return serializeProject(project);
-  });
-
-  ipcMain.handle('project:createSample', async () => {
-    const project = await createSampleProject({
-      app,
-      appRoot: __dirname,
-      findAvailablePort,
-      inspectProjectDirectory,
-      projectStore,
-      resourcesPath: process.resourcesPath,
+  for (const [channel, handler] of Object.entries(ipcApi.syncHandlers)) {
+    ipcMain.on(channel, (event, ...args) => {
+      event.returnValue = handler(...args);
     });
-    emitProjectListChanged();
-    return serializeProject(project);
-  });
-
-  ipcMain.handle('project:suggestPort', (_event, preferredPort = 3000) =>
-    findAvailablePort(preferredPort)
-  );
-
-  ipcMain.handle('project:checkPort', async (_event, port) => ({
-    port,
-    available: await checkPortAvailable(port),
-  }));
-
-  ipcMain.handle('project:update', (_event, projectId, patch = {}) => {
-    assertSafeProjectMutation(projectId, patch);
-    const project = projectStore.update(projectId, patch);
-    emitProjectListChanged();
-    return serializeProject(project);
-  });
-
-  ipcMain.handle('project:delete', async (_event, projectId) => {
-    closeProjectPreview(projectId);
-    await projectLifecycle.stop(projectId);
-    projectStore.delete(projectId);
-    emitProjectListChanged();
-    return true;
-  });
-
-  ipcMain.handle('project:start', async (_event, projectId) => {
-    const project = getProjectOrThrow(projectId);
-    const state = await projectLifecycle.start(project);
-    emitProjectListChanged();
-    return state;
-  });
-
-  ipcMain.handle('project:stop', async (_event, projectId) => {
-    closeProjectPreview(projectId);
-    const state = await projectLifecycle.stop(projectId);
-    emitProjectListChanged();
-    return state;
-  });
-
-  ipcMain.handle('project:restart', async (_event, projectId) => {
-    const project = getProjectOrThrow(projectId);
-    closeProjectPreview(projectId);
-    const state = await projectLifecycle.restart(project);
-    emitProjectListChanged();
-    return state;
-  });
-
-  ipcMain.handle('project:open', (_event, projectId) => {
-    const project = getProjectOrThrow(projectId);
-    openProject(project);
-    return true;
-  });
-
-  ipcMain.handle('project:preview', (_event, projectId, bounds) => {
-    const project = getProjectOrThrow(projectId);
-    return previewProject(project, bounds);
-  });
-
-  ipcMain.handle('project:previewResize', (_event, bounds) => resizeProjectPreview(bounds));
-
-  ipcMain.handle('project:previewReload', () => reloadProjectPreview());
-
-  ipcMain.handle('project:previewClose', () => closeProjectPreview());
-
-  ipcMain.handle('project:clearLogs', (_event, projectId) => {
-    const state = projectLifecycle.clearLogs(projectId);
-    emitProjectListChanged();
-    return state;
-  });
-
-  ipcMain.handle('project:copyLogs', (_event, projectId) => {
-    const state = projectLifecycle.getState(projectId);
-    const text = state.logs.join('\n');
-    clipboard.writeText(text);
-    return {
-      copied: state.logs.length,
-    };
-  });
-
-  ipcMain.handle('project:applyDoctorAction', (_event, projectId, actionId) =>
-    applyDoctorAction(projectId, actionId)
-  );
-
-  ipcMain.handle('project:copyDoctorReport', (_event, projectId) => {
-    const project = getProjectOrThrow(projectId);
-    const runtime = serializeRuntime(projectId);
-    const text = buildDoctorReport(project, runtime);
-    clipboard.writeText(text);
-    return {
-      copied: true,
-      lines: text.split('\n').length - 1,
-    };
-  });
-
-  ipcMain.handle('project:revealDirectory', async (_event, projectId) => {
-    const project = getProjectOrThrow(projectId);
-    await revealProjectDirectory(project);
-    return true;
-  });
-
-  ipcMain.handle('project:discoverScripts', (_event, cwd) => discoverPackageScripts(cwd));
-
-  ipcMain.handle('dir:select', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      title: 'Select project directory',
-      properties: ['openDirectory'],
-    });
-
-    if (result.canceled || result.filePaths.length === 0) {
-      return null;
-    }
-
-    return result.filePaths[0];
-  });
+  }
 }
 
 async function startAutostartProjects() {
@@ -769,6 +539,7 @@ app.whenReady().then(async () => {
       return;
     }
 
+    previewController = createPreviewController();
     projectLifecycle = new ProjectLifecycle({ openProject, checkPortAvailable, findAvailablePort });
     projectLifecycle.on('event', (event) => {
       sendToRenderer('project:event', event);
