@@ -49,6 +49,16 @@ module.exports = [
     },
   },
 
+  // Shared constants load as a browser script AND get required by lib (CJS).
+  {
+    files: ['public/shared-constants.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'script',
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
+
   // Tests (Jest + Node).
   {
     files: ['__tests__/**/*.js', 'jest.setup.js'],

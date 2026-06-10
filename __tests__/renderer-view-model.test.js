@@ -1,3 +1,5 @@
+// In the app, a script tag loads shared-constants.js before app.js.
+globalThis.LocalWrapConstants = require('../public/shared-constants');
 require('../public/app.js');
 
 const renderer = global.LocalWrapRenderer;

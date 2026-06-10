@@ -158,6 +158,8 @@ describe('renderer sample project action', () => {
     global.document = dom.document;
     global.window = dom.window;
 
+    // In the app, a script tag loads shared-constants.js before app.js.
+    globalThis.LocalWrapConstants = require('../public/shared-constants');
     require('../public/app.js');
     dom.windowListeners.DOMContentLoaded();
     await flushPromises();

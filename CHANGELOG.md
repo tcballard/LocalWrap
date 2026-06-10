@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cmd.exe expansion/escaping tricks on the Windows (shell) spawn path.
 - CI now runs the test suite on Windows and macOS in addition to Linux, so
   platform-specific process handling is exercised before release time.
+- Constants shared across the IPC bridge (active statuses, Project Doctor
+  checks and action ids, the auto-URL pattern) now have a single source in
+  `public/shared-constants.js`, used by both the renderer and the main
+  process, instead of hand-mirrored copies.
 
 ### Removed
 
