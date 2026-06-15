@@ -56,6 +56,16 @@ module.exports = [
     },
   },
 
+  // Shared constants load as a browser script AND get required by lib (CJS).
+  {
+    files: ['public/shared-constants.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'script',
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
+
   // Tests (Jest + Node).
   {
     files: ['__tests__/**/*.js', 'jest.setup.js'],
@@ -63,6 +73,16 @@ module.exports = [
       ecmaVersion: 2022,
       sourceType: 'commonjs',
       globals: { ...globals.node, ...globals.jest },
+    },
+  },
+
+  // End-to-end tests (Playwright + Node).
+  {
+    files: ['e2e/**/*.js', 'playwright.config.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: { ...globals.node },
     },
   },
 

@@ -42,6 +42,13 @@ describe('validateScriptCommand', () => {
     expect(() => validateScriptCommand('npm `whoami`')).toThrow(/shell characters/);
   });
 
+  test('rejects cmd.exe expansion, escaping, and quoting', () => {
+    expect(() => validateScriptCommand('node %USERPROFILE%')).toThrow(/shell characters/);
+    expect(() => validateScriptCommand('npm run dev ^&^& evil')).toThrow(/shell characters/);
+    expect(() => validateScriptCommand('node "server.js"')).toThrow(/shell characters/);
+    expect(() => validateScriptCommand("npm run 'dev'")).toThrow(/shell characters/);
+  });
+
   test('rejects empty or non-string input', () => {
     expect(() => validateScriptCommand('')).toThrow(/No command/);
     expect(() => validateScriptCommand('   ')).toThrow(/No command/);

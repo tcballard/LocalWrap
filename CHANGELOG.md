@@ -25,6 +25,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project persistence now writes atomically and backs up corrupt project data
   before falling back to an empty store.
 
+## [2.8.0] - 2026-06-10
+
+### Fixed
+
+- Saved projects can no longer be silently wiped by a corrupt or unreadable
+  `projects.json`: reads now fail closed, saves are written atomically, and
+  every successful save keeps a `projects.json.bak`. If the file is ever
+  unreadable at launch, LocalWrap asks whether to restore the backup or start
+  fresh (the unreadable file is preserved alongside, never deleted).
+- Stopping a project now escalates from SIGTERM to SIGKILL when the process
+  ignores the first signal, and the status only reports "Stopped" when the
+  process actually exited — a survivor is shown as "Running, no response" so
+  it can be stopped again instead of silently holding its port.
+- Stopping a project now cancels the readiness polling immediately instead of
+  letting it probe the URL for up to 30 more seconds.
+- Output and exit events from a previous run can no longer bleed into a
+  restarted project's logs and status.
+
+### Changed
+
+- The app version shown in the UI is now sourced from the main process
+  (`package.json`) instead of a hardcoded copy in the preload script.
+- Command validation also rejects `%`, `^`, and quote characters, closing
+  cmd.exe expansion/escaping tricks on the Windows (shell) spawn path.
+- CI now runs the test suite on Windows and macOS in addition to Linux, so
+  platform-specific process handling is exercised before release time.
+- Constants shared across the IPC bridge (active statuses, Project Doctor
+  checks and action ids, the auto-URL pattern) now have a single source in
+  `public/shared-constants.js`, used by both the renderer and the main
+  process, instead of hand-mirrored copies.
+
+### Added
+
+- End-to-end smoke test (`npm run test:e2e`, Playwright) that launches the
+  real app with an isolated config dir, creates the sample project, starts
+  it, waits for readiness, and stops it. Runs in CI on Linux.
+
+### Removed
+
+- Dead code: the unused `dir:current` IPC channel / `getCurrentDirectory`
+  preload API, the inert `new-window` handler (the event was removed in
+  Electron 22; `setWindowOpenHandler` already governs window opening), and the
+  phantom `running` runtime status in the renderer (the lifecycle never emits
+  it).
+
 ## [2.7.0] - 2026-06-08
 
 ### Added

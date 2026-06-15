@@ -1,22 +1,15 @@
 (function () {
-  const ACTIVE_STATUSES = new Set([
-    'starting',
-    'running',
-    'ready',
-    'running-unresponsive',
-    'stopping',
-  ]);
-  const AUTO_URL_RE = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]):\d+$/;
+  // Loaded by the shared-constants.js script tag (or by tests via require)
+  // before this file; the single source shared with the main process.
+  const SHARED = globalThis.LocalWrapConstants;
+  if (!SHARED) {
+    throw new Error('shared-constants.js must be loaded before app.js');
+  }
+
+  const ACTIVE_STATUSES = new Set(SHARED.ACTIVE_STATUSES);
+  const AUTO_URL_RE = SHARED.AUTO_LOCAL_URL_RE;
   const FIELD_NAMES = ['name', 'cwd', 'command', 'port', 'url'];
-  const DOCTOR_CHECKS = [
-    ['directory', 'Directory'],
-    ['command', 'Command'],
-    ['dependencies', 'Dependencies'],
-    ['port', 'Port'],
-    ['url', 'URL'],
-    ['process', 'Process'],
-    ['readiness', 'Readiness'],
-  ];
+  const DOCTOR_CHECKS = SHARED.DOCTOR_CHECKS;
   const DOCTOR_ICONS = {
     pass: 'OK',
     warn: '!',
@@ -24,7 +17,8 @@
     running: '...',
     pending: '-',
   };
-  const DOCTOR_MUTATING_ACTIONS = new Set(['use-free-port', 'sync-url-to-port']);
+  const DOCTOR_MUTATING_ACTIONS = new Set(SHARED.DOCTOR_MUTATING_ACTIONS);
+  const DOCTOR_ACTION = SHARED.DOCTOR_ACTIONS;
 
   const state = {
     api: null,
@@ -138,7 +132,6 @@
   function statusLabel(status) {
     const labels = {
       starting: 'Starting',
-      running: 'Running',
       ready: 'Ready',
       'running-unresponsive': 'Running, no response',
       stopping: 'Stopping',
@@ -450,12 +443,12 @@
       return true;
     }
 
-    if (actionId === 'reveal-command') {
+    if (actionId === DOCTOR_ACTION.REVEAL_COMMAND) {
       return false;
     }
 
     const saved = Boolean(project && !project.isDraft);
-    if (actionId === 'copy-report' || actionId === 'reveal-directory') {
+    if (actionId === DOCTOR_ACTION.COPY_REPORT || actionId === DOCTOR_ACTION.REVEAL_DIRECTORY) {
       return !saved;
     }
 
@@ -480,9 +473,12 @@
     state.elements.toggleDoctorBtn.innerHTML = `<span class="btn-icon">${sectionButtonIcon(
       collapsed
     )}</span>${sectionButtonText(collapsed)}`;
-    state.elements.copyDoctorReportBtn.disabled = isDoctorActionDisabled('copy-report', project);
+    state.elements.copyDoctorReportBtn.disabled = isDoctorActionDisabled(
+      DOCTOR_ACTION.COPY_REPORT,
+      project
+    );
     state.elements.revealProjectDirBtn.disabled = isDoctorActionDisabled(
-      'reveal-directory',
+      DOCTOR_ACTION.REVEAL_DIRECTORY,
       project
     );
     state.elements.doctorChecks.textContent = '';
@@ -1181,14 +1177,14 @@
   }
 
   async function applyDraftDoctorAction(actionId) {
-    if (actionId === 'sync-url-to-port') {
+    if (actionId === DOCTOR_ACTION.SYNC_URL_TO_PORT) {
       state.elements.urlInput.value = getAutoUrl(Number(state.elements.portInput.value));
       handleFormChange();
       setStatus('Synced URL to the selected port.');
       return;
     }
 
-    if (actionId === 'use-free-port') {
+    if (actionId === DOCTOR_ACTION.USE_FREE_PORT) {
       const oldPort = Number(state.elements.portInput.value);
       const port = await state.api.suggestPort(oldPort || 3000);
       const shouldUpdateUrl =
@@ -1206,7 +1202,7 @@
     const project = selectedProject();
     if (!project) return;
 
-    if (actionId === 'reveal-command') {
+    if (actionId === DOCTOR_ACTION.REVEAL_COMMAND) {
       toggleCommandReveal();
       return;
     }
@@ -1216,13 +1212,13 @@
       return;
     }
 
-    if (actionId === 'copy-report') {
+    if (actionId === DOCTOR_ACTION.COPY_REPORT) {
       const result = await state.api.copyDoctorReport(project.id);
       setStatus(`Copied Doctor report (${result.lines} line(s)).`);
       return;
     }
 
-    if (actionId === 'reveal-directory') {
+    if (actionId === DOCTOR_ACTION.REVEAL_DIRECTORY) {
       await state.api.revealProjectDirectory(project.id);
       setStatus(`Revealed ${project.name}.`);
       return;
@@ -1322,10 +1318,10 @@
     state.elements.copyLogsBtn.addEventListener('click', () => copyLogs().catch(showError));
     state.elements.revealCommandBtn.addEventListener('click', toggleCommandReveal);
     state.elements.copyDoctorReportBtn.addEventListener('click', () =>
-      handleDoctorAction('copy-report').catch(showError)
+      handleDoctorAction(DOCTOR_ACTION.COPY_REPORT).catch(showError)
     );
     state.elements.revealProjectDirBtn.addEventListener('click', () =>
-      handleDoctorAction('reveal-directory').catch(showError)
+      handleDoctorAction(DOCTOR_ACTION.REVEAL_DIRECTORY).catch(showError)
     );
     state.elements.toggleDoctorBtn.addEventListener('click', () => toggleSection('doctor'));
     state.elements.doctorChecks.addEventListener('click', (event) => {

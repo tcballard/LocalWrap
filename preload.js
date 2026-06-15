@@ -21,7 +21,9 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '3.0.0',
+  // Sandboxed preloads can't require app files, so the version comes from the
+  // main process (app.getVersion() reads package.json) instead of a copy here.
+  version: ipcRenderer.sendSync('app:version'),
   platform: 'desktop',
   isElectron: true,
 
@@ -56,7 +58,6 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   revealProjectDirectory: (projectId) => ipcRenderer.invoke('project:revealDirectory', projectId),
 
   selectDirectory: () => ipcRenderer.invoke('dir:select'),
-  getCurrentDirectory: () => ipcRenderer.invoke('dir:current'),
 
   onProjectEvent: (callback) => subscribe('project:event', callback),
   onProjectListChanged: (callback) => subscribe('project:list-changed', callback),

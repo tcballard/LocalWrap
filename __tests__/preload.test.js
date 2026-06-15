@@ -1,7 +1,10 @@
 // Tests the real preload.js by mocking electron and capturing the API it
 // exposes via contextBridge.
 
+const { version: packageVersion } = require('../package.json');
+
 const mockInvoke = jest.fn(() => Promise.resolve());
+const mockSendSync = jest.fn((channel) => (channel === 'app:version' ? packageVersion : undefined));
 const mockOn = jest.fn();
 const mockRemoveListener = jest.fn();
 let exposed;
@@ -16,6 +19,7 @@ jest.mock(
     },
     ipcRenderer: {
       invoke: mockInvoke,
+      sendSync: mockSendSync,
       on: mockOn,
       removeListener: mockRemoveListener,
     },
@@ -36,7 +40,9 @@ describe('preload contextBridge API', () => {
     const api = exposed.api;
     expect(api.isElectron).toBe(true);
     expect(api.platform).toBe('desktop');
-    expect(api.version).toBe('3.0.0');
+    // The version is sourced from the main process, never hardcoded in preload.
+    expect(mockSendSync).toHaveBeenCalledWith('app:version');
+    expect(api.version).toBe(packageVersion);
 
     for (const method of [
       'listProjects',
@@ -68,7 +74,6 @@ describe('preload contextBridge API', () => {
       'copyDoctorReport',
       'revealProjectDirectory',
       'selectDirectory',
-      'getCurrentDirectory',
       'onProjectEvent',
       'onProjectListChanged',
       'onPreviewEvent',
