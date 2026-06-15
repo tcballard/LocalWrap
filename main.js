@@ -34,6 +34,7 @@ let projectStore;
 let projectLifecycle;
 let previewView;
 let previewProjectId;
+let lastPersistedWorkspaceKey = '';
 
 function getProjectsFilePath() {
   return path.join(app.getPath('userData'), 'projects.json');
@@ -62,6 +63,64 @@ function serializeRuntime(projectId) {
 
 function serializeProjects() {
   return projectStore.list().map(serializeProject);
+}
+
+function serializeWorkspace() {
+  return projectStore.getWorkspace();
+}
+
+function persistActiveWorkspaceSnapshot() {
+  if (!projectStore || !projectLifecycle) {
+    return serializeWorkspace();
+  }
+
+  const activeProjectIds = projectLifecycle.getActiveProjectIds();
+  if (activeProjectIds.length === 0) {
+    return serializeWorkspace();
+  }
+
+  const key = activeProjectIds.join('\0');
+  if (key === lastPersistedWorkspaceKey) {
+    return serializeWorkspace();
+  }
+
+  lastPersistedWorkspaceKey = key;
+  return projectStore.setLastRunningProjectIds(activeProjectIds);
+}
+
+async function startProjects(projects) {
+  const results = await projectLifecycle.startAll(projects);
+  persistActiveWorkspaceSnapshot();
+  emitProjectListChanged();
+  return {
+    results,
+    workspace: serializeWorkspace(),
+    projects: serializeProjects(),
+  };
+}
+
+async function startAllProjects() {
+  return startProjects(projectStore.list());
+}
+
+async function resumeWorkspaceProjects() {
+  const workspace = serializeWorkspace();
+  const projects = workspace.lastRunningProjectIds
+    .map((projectId) => projectStore.get(projectId))
+    .filter(Boolean);
+
+  return startProjects(projects);
+}
+
+async function stopAllProjects() {
+  persistActiveWorkspaceSnapshot();
+  const states = await projectLifecycle.stopAll();
+  emitProjectListChanged();
+  return {
+    states,
+    workspace: serializeWorkspace(),
+    projects: serializeProjects(),
+  };
 }
 
 function getProjectOrThrow(projectId) {
@@ -343,6 +402,7 @@ function createTrayMenuTemplate() {
   const projects = projectStore ? serializeProjects() : [];
   const activeProjects = projects.filter((project) => ACTIVE_STATUSES.has(project.runtime.status));
   const readyProjects = projects.filter((project) => project.runtime.status === 'ready');
+  const workspace = projectStore ? projectStore.getWorkspace() : { lastRunningProjectIds: [] };
 
   return [
     {
@@ -362,13 +422,26 @@ function createTrayMenuTemplate() {
       },
     },
     {
+      label: 'Resume Workspace',
+      enabled: activeProjects.length === 0 && workspace.lastRunningProjectIds.length > 0,
+      click: () => {
+        resumeWorkspaceProjects().catch((error) =>
+          console.error('Failed to resume workspace:', error)
+        );
+      },
+    },
+    {
+      label: 'Start All Projects',
+      enabled: projects.length > 0,
+      click: () => {
+        startAllProjects().catch((error) => console.error('Failed to start projects:', error));
+      },
+    },
+    {
       label: 'Stop All Running Projects',
       enabled: activeProjects.length > 0,
       click: () => {
-        projectLifecycle
-          .stopAll()
-          .then(emitProjectListChanged)
-          .catch((error) => console.error('Failed to stop projects:', error));
+        stopAllProjects().catch((error) => console.error('Failed to stop projects:', error));
       },
     },
     { type: 'separator' },
@@ -391,6 +464,7 @@ function createTrayMenuTemplate() {
             label: 'Stop',
             enabled: project.runtime.status !== 'stopping',
             click: () => {
+              persistActiveWorkspaceSnapshot();
               projectLifecycle
                 .stop(project.id)
                 .then(emitProjectListChanged)
@@ -511,6 +585,8 @@ async function applyDoctorAction(projectId, actionId) {
 function registerIpcHandlers() {
   ipcMain.handle('project:list', () => serializeProjects());
 
+  ipcMain.handle('workspace:get', () => serializeWorkspace());
+
   ipcMain.handle('project:inspectDirectory', (_event, cwd) =>
     inspectProjectDirectory(cwd, {
       findAvailablePort,
@@ -587,6 +663,7 @@ function registerIpcHandlers() {
 
   ipcMain.handle('project:stop', async (_event, projectId) => {
     closeProjectPreview(projectId);
+    persistActiveWorkspaceSnapshot();
     const state = await projectLifecycle.stop(projectId);
     emitProjectListChanged();
     return state;
@@ -595,10 +672,17 @@ function registerIpcHandlers() {
   ipcMain.handle('project:restart', async (_event, projectId) => {
     const project = getProjectOrThrow(projectId);
     closeProjectPreview(projectId);
+    persistActiveWorkspaceSnapshot();
     const state = await projectLifecycle.restart(project);
     emitProjectListChanged();
     return state;
   });
+
+  ipcMain.handle('project:startAll', () => startAllProjects());
+
+  ipcMain.handle('project:stopAll', () => stopAllProjects());
+
+  ipcMain.handle('workspace:resume', () => resumeWorkspaceProjects());
 
   ipcMain.handle('project:open', (_event, projectId) => {
     const project = getProjectOrThrow(projectId);
@@ -689,6 +773,7 @@ app.whenReady().then(async () => {
     projectLifecycle.on('event', (event) => {
       sendToRenderer('project:event', event);
       if (event.type === 'state') {
+        persistActiveWorkspaceSnapshot();
         refreshTray();
       }
     });
@@ -725,6 +810,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuiting = true;
   if (projectLifecycle) {
+    persistActiveWorkspaceSnapshot();
     projectLifecycle.stopAll().catch((error) => console.error('Failed to stop projects:', error));
   }
 });

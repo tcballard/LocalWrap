@@ -65,4 +65,17 @@ describe('renderer view-model helpers', () => {
 
     expect(next[0].runtime.diagnosis.summary).toBe('Waiting for URL.');
   });
+
+  test('maps runtime state to the v3 run progress path', () => {
+    expect(
+      renderer.runProgressIndex({
+        runtime: { status: 'starting' },
+      })
+    ).toBe(1);
+    expect(
+      renderer.runProgressIndex({
+        runtime: { status: 'ready' },
+      })
+    ).toBe(2);
+  });
 });

@@ -22,7 +22,7 @@ describe('renderer UI surface', () => {
     expect(js).toContain('state.api.createSampleProject');
     expect(js).toContain('const sample = await state.api.createSampleProject();');
     expect(js).toContain('setSelected(sample.id);');
-    expect(js).toContain('Sample project ready. Click Start.');
+    expect(js).toContain('Sample project ready. Click Save & Start.');
   });
 
   test('hidden detail panel stays out of the first-run layout', () => {
@@ -33,10 +33,21 @@ describe('renderer UI surface', () => {
   test('project form is grouped into calm first-run sections', () => {
     expect(html).toContain('id="setupPanel"');
     expect(html).toContain('id="toggleSetupBtn"');
+    expect(html).toContain('id="runProgress"');
     expect(html).toContain('<legend>Project</legend>');
     expect(html).toContain('<legend>Launch</legend>');
     expect(html).toContain('<legend>Options</legend>');
     expect(html).toContain('id="draftNotice"');
+  });
+
+  test('v3 workspace controls are exposed in the toolbar', () => {
+    for (const id of ['resumeWorkspaceBtn', 'startAllProjectsBtn', 'stopAllProjectsBtn']) {
+      expect(html).toContain(`id="${id}"`);
+    }
+
+    expect(html).toContain('Resume Workspace');
+    expect(html).toContain('Start All');
+    expect(html).toContain('Stop All');
   });
 
   test('project form exposes inline validation message targets', () => {
@@ -49,6 +60,14 @@ describe('renderer UI surface', () => {
     for (const id of ['revealCommandBtn', 'copyLogsBtn', 'clearLogsBtn', 'commandReveal']) {
       expect(html).toContain(`id="${id}"`);
     }
+  });
+
+  test('launch actions expose Save & Start as the first green run action', () => {
+    expect(html).toContain('id="saveAndStartBtn"');
+    expect(html).toContain('Save &amp; Start');
+    expect(html.indexOf('id="saveAndStartBtn"')).toBeLessThan(html.indexOf('id="startProjectBtn"'));
+    expect(js).toContain('saveAndStartProject');
+    expect(js).toContain('state.api.startProject(saved.id)');
   });
 
   test('runtime area exposes an in-app preview surface', () => {

@@ -4,15 +4,19 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![Electron](https://img.shields.io/badge/electron-42-47848F.svg)](https://www.electronjs.org)
 
-A secure desktop launcher for local development projects. LocalWrap gives you a
-small, retro Windows-95-styled desktop app to save projects, run their dev
-commands, stream logs, track readiness, and open the local app URL without
-terminal juggling.
+The desktop cockpit for localhost apps. LocalWrap helps you get any local app to
+green, then bring the workspace back tomorrow: save projects, run their dev
+commands, track readiness, diagnose failures, preview local URLs, and resume the
+same working set without terminal juggling.
 
 ## Features
 
-- **Saved project launcher** — keep project directory, command, port, URL,
+- **First green run** — import a project, confirm the suggested command, port,
+  and URL, then use **Save & Start** to move from configured to ready.
+- **Saved project cockpit** — keep project directory, command, port, URL,
   autostart, and open-on-ready preferences in one place.
+- **Resume Workspace** — restart the last set of local projects you had running
+  so tomorrow's workspace comes back in one action.
 - **Guided project import** — pick a repo and LocalWrap suggests the name,
   command, port, and URL from common package scripts.
 - **Process control** — start/stop/restart dev commands with `PORT` injected and
@@ -21,8 +25,11 @@ terminal juggling.
   projects ready when they respond.
 - **Inline validation** — see missing directories, unsafe commands, invalid URLs,
   and busy ports before saving or starting.
-- **Project Doctor** — see preflight checks, start timeline, readiness diagnosis,
-  safe fixes, and a copyable report when a project needs attention.
+- **Project Doctor** — see preflight checks, next-step guidance, start timeline,
+  readiness diagnosis, safe fixes, and a copyable report when a project needs
+  attention.
+- **In-app preview** — inspect ready local apps inside LocalWrap before opening a
+  browser.
 - **One-click open** — launch a ready local app in your browser.
 - **System tray integration** — minimize to the tray and keep projects running in
   the background.
@@ -76,8 +83,8 @@ This repo includes a dependency-free sample app at
 `examples/sample-project`. On first launch, when no projects are saved, choose
 **Try Sample Project** to copy that app into LocalWrap's user data folder and
 save it as a normal project. LocalWrap selects it but does not start it
-automatically, so click **Start** to see Project Doctor, logs, readiness,
-**Preview**, and **Open**.
+automatically, so click **Save & Start** or **Start** to see Project Doctor,
+logs, readiness, **Preview**, and **Open**.
 
 When running from source, you can still use **Add Project** and import
 `examples/sample-project` manually.

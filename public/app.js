@@ -29,6 +29,9 @@
   const state = {
     api: null,
     projects: [],
+    workspace: {
+      lastRunningProjectIds: [],
+    },
     selectedId: null,
     draft: null,
     scripts: [],
@@ -312,6 +315,10 @@
       state.projects = (await state.api.listProjects()).map(normalizeProjectForView);
     }
 
+    if (state.api.getWorkspace) {
+      state.workspace = await state.api.getWorkspace();
+    }
+
     if (
       !state.draft &&
       (!state.selectedId || !state.projects.some((project) => project.id === state.selectedId))
@@ -336,7 +343,19 @@
   function render() {
     renderProjectList();
     renderDetail();
+    updateWorkspaceActions();
     updateStatusRight();
+  }
+
+  function activeProjects() {
+    return state.projects.filter((project) => isProjectActive(project));
+  }
+
+  function hasResumableWorkspace() {
+    const savedIds = new Set(state.projects.map((project) => project.id));
+    return (state.workspace.lastRunningProjectIds || []).some((projectId) =>
+      savedIds.has(projectId)
+    );
   }
 
   function renderProjectList() {
@@ -402,6 +421,7 @@
     state.elements.openOnReadyInput.checked = Boolean(project.openOnReady);
 
     renderSetup(project);
+    renderRunProgress(project);
     renderScripts();
     renderRuntime(project);
     applyValidationMessages();
@@ -510,6 +530,7 @@
 
     renderPreview(project);
     renderDoctor(project);
+    renderRunProgress(project);
     state.elements.statusBadge.className = `badge ${runtime.status || 'stopped'}`;
     state.elements.statusBadge.textContent = statusLabel(runtime.status);
     state.elements.pidLabel.textContent = `PID: ${runtime.pid || '-'}`;
@@ -524,6 +545,34 @@
     });
     state.elements.terminal.scrollTop = state.elements.terminal.scrollHeight;
     updateActionState();
+  }
+
+  function runProgressIndex(project) {
+    if (!project) return -1;
+    if (state.previewVisible && state.previewProjectId === project.id) return 3;
+    if (project.runtime?.status === 'ready') return 2;
+    if (isProjectActive(project)) return 1;
+    return state.validation?.valid ? 0 : -1;
+  }
+
+  function renderRunProgress(project) {
+    const container = state.elements.runProgress;
+    if (!container) return;
+
+    const labels = ['Configured', 'Starting', 'Ready', 'Previewing'];
+    const index = runProgressIndex(project);
+    container.textContent = '';
+    labels.forEach((label, stepIndex) => {
+      const step = document.createElement('div');
+      step.className = 'progress-step';
+      if (index === stepIndex) {
+        step.classList.add('active');
+      } else if (index > stepIndex) {
+        step.classList.add('done');
+      }
+      step.textContent = label;
+      container.appendChild(step);
+    });
   }
 
   function resetPreviewState() {
@@ -705,8 +754,10 @@
     const valid = validationKnown && state.validation.valid;
     const dirty = isFormDirty();
     const ready = project?.runtime?.status === 'ready';
+    const stopping = project?.runtime?.status === 'stopping';
 
     state.elements.saveProjectBtn.disabled = !project || !valid;
+    state.elements.saveAndStartBtn.disabled = !project || !valid || active || stopping;
     state.elements.deleteProjectBtn.disabled = !saved;
     state.elements.startProjectBtn.disabled = !saved || !valid || dirty || active;
     state.elements.stopProjectBtn.disabled =
@@ -721,7 +772,24 @@
     if (state.elements.doctorPanel) {
       renderDoctor(project);
     }
+    renderRunProgress(project);
+    updateWorkspaceActions();
     updateStatusRight();
+  }
+
+  function updateWorkspaceActions() {
+    const active = activeProjects();
+    const hasProjects = state.projects.length > 0;
+    const resumable = hasResumableWorkspace();
+    if (state.elements.resumeWorkspaceBtn) {
+      state.elements.resumeWorkspaceBtn.disabled = active.length > 0 || !resumable;
+    }
+    if (state.elements.startAllProjectsBtn) {
+      state.elements.startAllProjectsBtn.disabled = !hasProjects;
+    }
+    if (state.elements.stopAllProjectsBtn) {
+      state.elements.stopAllProjectsBtn.disabled = active.length === 0;
+    }
   }
 
   async function discoverScripts(cwd) {
@@ -843,7 +911,7 @@
       await loadProjects();
       setSelected(sample.id);
       await validateCurrentDraft({ silent: true });
-      setStatus('Sample project ready. Click Start.');
+      setStatus('Sample project ready. Click Save & Start.');
     } finally {
       if (button) {
         button.disabled = false;
@@ -901,6 +969,32 @@
     }
   }
 
+  async function saveAndStartProject() {
+    const validation = await validateCurrentDraft({ silent: false });
+    if (!validation.valid) {
+      return;
+    }
+
+    const formProject = readFormProject();
+    try {
+      let saved;
+      if (formProject.isDraft) {
+        saved = await state.api.createProject(formProject);
+      } else {
+        saved = await state.api.updateProject(formProject.id, formProject);
+      }
+
+      state.draft = null;
+      state.selectedId = saved.id;
+      state.inspectionWarnings = [];
+      await loadProjects();
+      await state.api.startProject(saved.id);
+      setStatus(`Started ${saved.name}. Waiting for readiness.`);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
   async function deleteProject() {
     const project = selectedProject();
     if (!project || project.isDraft) return;
@@ -936,7 +1030,7 @@
 
     const labels = {
       startProject: 'Started',
-      stopProject: 'Stopping',
+      stopProject: 'Stopped',
       restartProject: 'Restarted',
       openProject: 'Opened',
     };
@@ -947,6 +1041,36 @@
       }
       await state.api[actionName](project.id);
       setStatus(`${labels[actionName]} ${project.name}.`);
+    } catch (error) {
+      showError(error);
+    }
+  }
+
+  async function runWorkspaceAction(actionName) {
+    const labels = {
+      resumeWorkspace: 'Resuming workspace.',
+      startAllProjects: 'Starting all projects.',
+      stopAllProjects: 'Stopping all projects.',
+    };
+
+    try {
+      setStatus(labels[actionName] || 'Updating workspace.');
+      const result = await state.api[actionName]();
+      if (result?.workspace) {
+        state.workspace = result.workspace;
+      }
+      if (result?.projects) {
+        await loadProjects(result.projects);
+      } else {
+        await loadProjects();
+      }
+
+      const failed = (result?.results || []).filter((item) => item.status === 'failed');
+      if (failed.length > 0) {
+        setStatus(`Workspace updated with ${failed.length} project(s) needing attention.`, 'error');
+      } else {
+        setStatus(labels[actionName] || 'Workspace updated.');
+      }
     } catch (error) {
       showError(error);
     }
@@ -1160,7 +1284,19 @@
       createSampleProjectFromBundle().catch(showError)
     );
     state.elements.saveProjectBtn.addEventListener('click', saveProject);
+    state.elements.saveAndStartBtn.addEventListener('click', () =>
+      saveAndStartProject().catch(showError)
+    );
     state.elements.deleteProjectBtn.addEventListener('click', deleteProject);
+    state.elements.resumeWorkspaceBtn.addEventListener('click', () =>
+      runWorkspaceAction('resumeWorkspace').catch(showError)
+    );
+    state.elements.startAllProjectsBtn.addEventListener('click', () =>
+      runWorkspaceAction('startAllProjects').catch(showError)
+    );
+    state.elements.stopAllProjectsBtn.addEventListener('click', () =>
+      runWorkspaceAction('stopAllProjects').catch(showError)
+    );
     state.elements.refreshBtn.addEventListener('click', () => loadProjects().catch(showError));
     state.elements.toggleSetupBtn.addEventListener('click', () => toggleSection('setup'));
     state.elements.browseDirBtn.addEventListener('click', () => browseDirectory().catch(showError));
@@ -1223,8 +1359,13 @@
       'emptyAddProjectBtn',
       'emptySampleProjectBtn',
       'draftNotice',
+      'runProgress',
       'saveProjectBtn',
+      'saveAndStartBtn',
       'deleteProjectBtn',
+      'resumeWorkspaceBtn',
+      'startAllProjectsBtn',
+      'stopAllProjectsBtn',
       'refreshBtn',
       'setupPanel',
       'setupSummary',
@@ -1354,6 +1495,7 @@
     normalizeProjectForView,
     pathBasename,
     projectFields,
+    runProgressIndex,
     statusLabel,
   };
 

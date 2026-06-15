@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] - 2026-06-15
+
+### Added
+
+- **Save & Start** flow for getting draft or edited projects from configuration
+  to runtime through one primary action.
+- **Resume Workspace**, **Start All**, and **Stop All** controls in the dashboard
+  and tray so the last running local-dev set can be brought back later.
+- Workspace metadata persisted alongside saved projects, including the last
+  non-empty running project set.
+- Compact run progress path for Configured, Starting, Ready, and Previewing.
+- v3 planning contract under `planning/roadmap/v3.0-localhost-cockpit.md`.
+
+### Changed
+
+- Repositioned LocalWrap as a desktop cockpit for localhost apps.
+- Project Doctor summaries now include clearer next-step guidance.
+- Project persistence now writes atomically and backs up corrupt project data
+  before falling back to an empty store.
+
 ## [2.7.0] - 2026-06-08
 
 ### Added

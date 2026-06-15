@@ -21,11 +21,12 @@ function subscribe(channel, callback) {
 }
 
 contextBridge.exposeInMainWorld('localwrapAPI', {
-  version: '2.7.0',
+  version: '3.0.0',
   platform: 'desktop',
   isElectron: true,
 
   listProjects: () => ipcRenderer.invoke('project:list'),
+  getWorkspace: () => ipcRenderer.invoke('workspace:get'),
   inspectDirectory: (workingDir) => ipcRenderer.invoke('project:inspectDirectory', workingDir),
   validateProjectDraft: (draft) => ipcRenderer.invoke('project:validateDraft', draft),
   diagnoseProjectDraft: (draft) => ipcRenderer.invoke('project:diagnoseDraft', draft),
@@ -36,6 +37,9 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   startProject: (projectId) => ipcRenderer.invoke('project:start', projectId),
   stopProject: (projectId) => ipcRenderer.invoke('project:stop', projectId),
   restartProject: (projectId) => ipcRenderer.invoke('project:restart', projectId),
+  startAllProjects: () => ipcRenderer.invoke('project:startAll'),
+  stopAllProjects: () => ipcRenderer.invoke('project:stopAll'),
+  resumeWorkspace: () => ipcRenderer.invoke('workspace:resume'),
   openProject: (projectId) => ipcRenderer.invoke('project:open', projectId),
   previewProject: (projectId, bounds) => ipcRenderer.invoke('project:preview', projectId, bounds),
   resizeProjectPreview: (bounds) => ipcRenderer.invoke('project:previewResize', bounds),

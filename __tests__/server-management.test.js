@@ -48,7 +48,7 @@ describe('ProjectLifecycle', () => {
     expect(state.readinessMessage).toBe('Project is ready.');
     expect(state.diagnosis).toMatchObject({
       status: 'ready',
-      summary: 'Project is ready.',
+      summary: 'Project is ready. Next: preview or open it.',
     });
     expect(state.diagnosisTimeline.map((event) => event.message)).toContain(
       'http://localhost:3000 responded.'
@@ -72,7 +72,7 @@ describe('ProjectLifecycle', () => {
     expect(state.readinessMessage).toMatch(/did not respond/);
     expect(state.diagnosis).toMatchObject({
       status: 'attention',
-      summary: 'Project is running but the URL is not responding.',
+      summary: 'Project is running but the URL is not responding. Next: check the URL and port.',
     });
     expect(state.logs.join('\n')).toMatch(/running-unresponsive/);
   });
@@ -91,7 +91,7 @@ describe('ProjectLifecycle', () => {
       readinessMessage: 'Project failed to start.',
       diagnosis: {
         status: 'failed',
-        summary: 'Project failed to start.',
+        summary: 'Project failed to start. Next: review the failed process check.',
       },
     });
   });
@@ -117,7 +117,7 @@ describe('ProjectLifecycle', () => {
       lastStoppedAt: '2026-06-06T00:00:00.000Z',
       diagnosis: {
         status: 'failed',
-        summary: 'Process exited with code 1.',
+        summary: 'Process exited with code 1. Next: review the output log.',
       },
     });
 
@@ -156,5 +156,28 @@ describe('ProjectLifecycle', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(openProject).toHaveBeenCalledWith(project);
+  });
+
+  test('starts projects as a batch and reports partial failures', async () => {
+    const lifecycle = new ProjectLifecycle({
+      startScript: jest.fn((options) => {
+        if (options.port === 4000) {
+          throw new Error('spawn failed');
+        }
+        return createFakeChild();
+      }),
+      waitForReady: jest.fn(() => Promise.resolve(true)),
+    });
+
+    const results = await lifecycle.startAll([
+      createProject({ id: 'project-1' }),
+      createProject({ id: 'project-2', port: 4000, url: 'http://localhost:4000' }),
+    ]);
+
+    expect(results).toMatchObject([
+      { projectId: 'project-1', status: 'started' },
+      { projectId: 'project-2', status: 'failed', error: 'spawn failed' },
+    ]);
+    expect(lifecycle.getActiveProjectIds()).toEqual(['project-1']);
   });
 });

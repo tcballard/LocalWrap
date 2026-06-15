@@ -223,6 +223,36 @@
         display: none;
       }
 
+      .run-progress {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-column: span 12;
+        gap: 6px;
+      }
+
+      .progress-step {
+        min-width: 0;
+        padding: 4px 5px;
+        border: 1px solid #aaa;
+        background: #fff;
+        color: #555;
+        font-size: 11px;
+        text-align: center;
+      }
+
+      .progress-step.active {
+        border-color: #2f6ea8;
+        background: #dfefff;
+        color: #003c74;
+        font-weight: 600;
+      }
+
+      .progress-step.done {
+        border-color: #5a9b68;
+        background: #e6f5e9;
+        color: #174f24;
+      }
+
       .group-box {
         display: grid;
         grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -761,6 +791,10 @@
           grid-template-columns: repeat(6, minmax(0, 1fr));
         }
 
+        .run-progress {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
         .span-12,
         .span-8,
         .span-7,
@@ -789,7 +823,7 @@
     <div class="window">
       <div class="titlebar">
         <div class="titlebar-title">LocalWrap</div>
-        <div class="titlebar-meta" id="versionLabel">v2.7</div>
+        <div class="titlebar-meta" id="versionLabel">v3.0</div>
       </div>
 
       <div class="toolbar">
@@ -801,6 +835,15 @@
         </button>
         <button class="btn" id="deleteProjectBtn" disabled>
           <span class="btn-icon">×</span>Delete
+        </button>
+        <button class="btn primary" id="resumeWorkspaceBtn" disabled>
+          <span class="btn-icon">▶</span>Resume Workspace
+        </button>
+        <button class="btn" id="startAllProjectsBtn" disabled>
+          <span class="btn-icon">▶</span>Start All
+        </button>
+        <button class="btn" id="stopAllProjectsBtn" disabled>
+          <span class="btn-icon">■</span>Stop All
         </button>
         <span class="toolbar-spacer"></span>
         <button class="btn" id="refreshBtn"><span class="btn-icon">↻</span>Refresh</button>
@@ -841,6 +884,7 @@
 
               <div class="form" id="setupFields">
                 <div class="notice" id="draftNotice"></div>
+                <div class="run-progress" id="runProgress" aria-label="Run progress"></div>
 
                 <fieldset class="group-box">
                   <legend>Project</legend>
@@ -902,6 +946,9 @@
                   </div>
 
                   <div class="actions span-8">
+                    <button class="btn primary" id="saveAndStartBtn">
+                      <span class="btn-icon">▶</span>Save &amp; Start
+                    </button>
                     <button class="btn primary" id="startProjectBtn">
                       <span class="btn-icon">▶</span>Start
                     </button>
