@@ -21,7 +21,14 @@ module.exports = [
 
   // Electron main + shared libs (Node, CommonJS).
   {
-    files: ['main.js', 'lib/**/*.js', 'examples/**/*.js', 'jest.config.js', 'eslint.config.js'],
+    files: [
+      'main.js',
+      'lib/**/*.js',
+      'scripts/**/*.js',
+      'examples/**/*.js',
+      'jest.config.js',
+      'eslint.config.js',
+    ],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',

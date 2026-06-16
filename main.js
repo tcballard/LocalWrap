@@ -25,6 +25,7 @@ let projectStore;
 let projectLifecycle;
 let previewController;
 let ipcApi;
+let lastPersistedWorkspaceKey = '';
 
 // Lets tests isolate their own config directory; harmless otherwise.
 if (process.env.LOCALWRAP_USER_DATA) {
@@ -108,6 +109,25 @@ function ensureProjectStoreReadable() {
       console.error(`Unreadable projects file preserved at: ${preservedPath}`);
     }
   }
+}
+
+function persistActiveWorkspaceSnapshot() {
+  if (!projectStore || !projectLifecycle) {
+    return projectStore ? projectStore.getWorkspace() : { lastRunningProjectIds: [] };
+  }
+
+  const activeProjectIds = projectLifecycle.getActiveProjectIds();
+  if (activeProjectIds.length === 0) {
+    return projectStore.getWorkspace();
+  }
+
+  const key = activeProjectIds.join('\0');
+  if (key === lastPersistedWorkspaceKey) {
+    return projectStore.getWorkspace();
+  }
+
+  lastPersistedWorkspaceKey = key;
+  return projectStore.setLastRunningProjectIds(activeProjectIds);
 }
 
 function sendToRenderer(channel, payload) {
@@ -362,6 +382,7 @@ function createTrayMenuTemplate() {
   const projects = projectStore && ipcApi ? ipcApi.serializeProjects() : [];
   const activeProjects = projects.filter((project) => ACTIVE_STATUSES.has(project.runtime.status));
   const readyProjects = projects.filter((project) => project.runtime.status === 'ready');
+  const workspace = projectStore ? projectStore.getWorkspace() : { lastRunningProjectIds: [] };
 
   return [
     {
@@ -381,13 +402,28 @@ function createTrayMenuTemplate() {
       },
     },
     {
+      label: 'Resume Workspace',
+      enabled: activeProjects.length === 0 && workspace.lastRunningProjectIds.length > 0,
+      click: () => {
+        ipcApi
+          .resumeWorkspaceProjects()
+          .catch((error) => console.error('Failed to resume workspace:', error));
+      },
+    },
+    {
+      label: 'Start All Projects',
+      enabled: projects.length > 0,
+      click: () => {
+        ipcApi
+          .startAllProjects()
+          .catch((error) => console.error('Failed to start projects:', error));
+      },
+    },
+    {
       label: 'Stop All Running Projects',
       enabled: activeProjects.length > 0,
       click: () => {
-        projectLifecycle
-          .stopAll()
-          .then(emitProjectListChanged)
-          .catch((error) => console.error('Failed to stop projects:', error));
+        ipcApi.stopAllProjects().catch((error) => console.error('Failed to stop projects:', error));
       },
     },
     { type: 'separator' },
@@ -410,6 +446,7 @@ function createTrayMenuTemplate() {
             label: 'Stop',
             enabled: project.runtime.status !== 'stopping',
             click: () => {
+              persistActiveWorkspaceSnapshot();
               projectLifecycle
                 .stop(project.id)
                 .then(emitProjectListChanged)
@@ -508,6 +545,7 @@ function registerIpcHandlers() {
     getMainWindow: () => mainWindow,
     openProject,
     preview: previewController,
+    persistActiveWorkspaceSnapshot,
   });
 
   for (const [channel, handler] of Object.entries(ipcApi.invokeHandlers)) {
@@ -544,6 +582,7 @@ app.whenReady().then(async () => {
     projectLifecycle.on('event', (event) => {
       sendToRenderer('project:event', event);
       if (event.type === 'state') {
+        persistActiveWorkspaceSnapshot();
         refreshTray();
       }
     });
@@ -580,6 +619,7 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   app.isQuiting = true;
   if (projectLifecycle) {
+    persistActiveWorkspaceSnapshot();
     projectLifecycle.stopAll().catch((error) => console.error('Failed to stop projects:', error));
   }
 });

@@ -178,6 +178,8 @@ describe('renderer sample project action', () => {
     expect(dom.elements.get('portInput').value).toBe(3000);
     expect(dom.elements.get('urlInput').value).toBe('http://localhost:3000');
     expect(dom.elements.get('startProjectBtn').disabled).toBe(false);
-    expect(dom.elements.get('statusBar').textContent).toBe('Sample project ready. Click Start.');
+    expect(dom.elements.get('statusBar').textContent).toBe(
+      'Sample project ready. Click Save & Start.'
+    );
   });
 });

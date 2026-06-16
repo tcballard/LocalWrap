@@ -94,6 +94,41 @@ describe('ProjectStore', () => {
     expect(createStore().list()[0].isSample).toBe(true);
   });
 
+  test('stores last running project ids in workspace metadata', () => {
+    const store = createStore();
+    const project = store.create({
+      cwd: fixture.cwd,
+      command: 'npm run dev',
+      port: 3000,
+      url: 'http://localhost:3000',
+    });
+
+    const workspace = store.setLastRunningProjectIds([project.id, 'missing', project.id]);
+
+    expect(workspace).toMatchObject({
+      lastRunningProjectIds: [project.id],
+      updatedAt: '2026-06-05T00:00:02.000Z',
+    });
+    expect(createStore().getWorkspace().lastRunningProjectIds).toEqual([project.id]);
+  });
+
+  test('preserves corrupt project data when starting fresh', () => {
+    fs.writeFileSync(fixture.filePath, '{not-json');
+    const store = createStore();
+
+    expect(() => store.list()).toThrow(/not valid JSON/);
+
+    const result = store.startFresh();
+
+    const backups = fs
+      .readdirSync(fixture.root)
+      .filter((file) => file.startsWith('projects.json.corrupt-'));
+    expect(backups).toHaveLength(1);
+    expect(path.basename(result.preservedPath)).toBe(backups[0]);
+    expect(fs.readFileSync(path.join(fixture.root, backups[0]), 'utf8')).toBe('{not-json');
+    expect(store.list()).toEqual([]);
+  });
+
   test('rejects unsafe commands, missing directories, and non-local URLs', () => {
     const store = createStore();
     expect(() =>

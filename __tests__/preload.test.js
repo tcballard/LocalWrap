@@ -46,6 +46,7 @@ describe('preload contextBridge API', () => {
 
     for (const method of [
       'listProjects',
+      'getWorkspace',
       'inspectDirectory',
       'validateProjectDraft',
       'diagnoseProjectDraft',
@@ -56,6 +57,9 @@ describe('preload contextBridge API', () => {
       'startProject',
       'stopProject',
       'restartProject',
+      'startAllProjects',
+      'stopAllProjects',
+      'resumeWorkspace',
       'openProject',
       'previewProject',
       'resizeProjectPreview',
@@ -83,6 +87,9 @@ describe('preload contextBridge API', () => {
 
     exposed.api.listProjects();
     expect(mockInvoke).toHaveBeenLastCalledWith('project:list');
+
+    exposed.api.getWorkspace();
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:get');
 
     exposed.api.inspectDirectory('/tmp/demo');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:inspectDirectory', '/tmp/demo');
@@ -113,6 +120,15 @@ describe('preload contextBridge API', () => {
 
     exposed.api.restartProject('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:restart', 'p1');
+
+    exposed.api.startAllProjects();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:startAll');
+
+    exposed.api.stopAllProjects();
+    expect(mockInvoke).toHaveBeenLastCalledWith('project:stopAll');
+
+    exposed.api.resumeWorkspace();
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:resume');
 
     exposed.api.openProject('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:open', 'p1');
