@@ -43,9 +43,6 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    # Informational while the smoke test proves itself stable; remove this
-    # once it has been green for a while to make it a required gate.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v6
 

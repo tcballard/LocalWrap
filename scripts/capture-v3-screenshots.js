@@ -26,6 +26,7 @@ const { ProjectStore } = require('../lib/projectStore');
 const { createSampleProject } = require('../lib/sampleProject');
 const { validateProjectDraft } = require('../lib/projectValidation');
 const { validateLocalProjectURL } = require('../lib/urlValidation');
+const { version } = require('../package.json');
 
 const repoRoot = path.join(__dirname, '..');
 const screenshotsDir = path.join(repoRoot, 'assets', 'screenshots', 'v3');
@@ -229,6 +230,10 @@ function resizeProjectPreview(bounds) {
 }
 
 function registerIpcHandlers() {
+  ipcMain.on('app:version', (event) => {
+    event.returnValue = version;
+  });
+
   ipcMain.handle('project:list', () => serializeProjects());
   ipcMain.handle('workspace:get', () => serializeWorkspace());
   ipcMain.handle('project:inspectDirectory', (_event, cwd) =>

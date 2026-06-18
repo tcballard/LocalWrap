@@ -110,6 +110,72 @@ describe('ProjectStore', () => {
       updatedAt: '2026-06-05T00:00:02.000Z',
     });
     expect(createStore().getWorkspace().lastRunningProjectIds).toEqual([project.id]);
+    expect(createStore().getWorkspace().savedWorkspaces).toEqual([]);
+  });
+
+  test('saves named workspace profiles with valid project ids only', () => {
+    const store = createStore();
+    const project = store.create({
+      cwd: fixture.cwd,
+      command: 'npm run dev',
+      port: 3000,
+      url: 'http://localhost:3000',
+    });
+
+    const profile = store.saveWorkspaceProfile({
+      name: 'Morning stack',
+      projectIds: [project.id, 'missing', project.id],
+    });
+
+    expect(profile).toMatchObject({
+      id: 'project-1',
+      name: 'Morning stack',
+      projectIds: [project.id],
+      createdAt: '2026-06-05T00:00:02.000Z',
+      updatedAt: '2026-06-05T00:00:02.000Z',
+      lastStartedAt: null,
+    });
+    expect(createStore().getWorkspace().savedWorkspaces).toHaveLength(1);
+  });
+
+  test('drops deleted projects from workspace profiles', () => {
+    const store = createStore();
+    const project = store.create({
+      cwd: fixture.cwd,
+      command: 'npm run dev',
+      port: 3000,
+      url: 'http://localhost:3000',
+    });
+    store.saveWorkspaceProfile({
+      name: 'Single project',
+      projectIds: [project.id],
+    });
+
+    store.delete(project.id);
+
+    expect(store.getWorkspace()).toMatchObject({
+      lastRunningProjectIds: [],
+      savedWorkspaces: [],
+    });
+  });
+
+  test('reads v3 workspace metadata without saved profiles', () => {
+    fs.writeFileSync(
+      fixture.filePath,
+      JSON.stringify({
+        projects: [],
+        workspace: {
+          lastRunningProjectIds: ['missing'],
+          updatedAt: '2026-06-05T00:00:00.000Z',
+        },
+      })
+    );
+
+    expect(createStore().getWorkspace()).toEqual({
+      lastRunningProjectIds: [],
+      savedWorkspaces: [],
+      updatedAt: '2026-06-05T00:00:00.000Z',
+    });
   });
 
   test('preserves corrupt project data when starting fresh', () => {

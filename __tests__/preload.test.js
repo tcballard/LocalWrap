@@ -60,6 +60,7 @@ describe('preload contextBridge API', () => {
       'startAllProjects',
       'stopAllProjects',
       'resumeWorkspace',
+      'saveWorkspaceProfile',
       'openProject',
       'previewProject',
       'resizeProjectPreview',
@@ -127,8 +128,13 @@ describe('preload contextBridge API', () => {
     exposed.api.stopAllProjects();
     expect(mockInvoke).toHaveBeenLastCalledWith('project:stopAll');
 
-    exposed.api.resumeWorkspace();
-    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:resume');
+    exposed.api.resumeWorkspace('workspace-1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:resume', 'workspace-1');
+
+    exposed.api.saveWorkspaceProfile({ name: 'Morning stack' });
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:saveProfile', {
+      name: 'Morning stack',
+    });
 
     exposed.api.openProject('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:open', 'p1');

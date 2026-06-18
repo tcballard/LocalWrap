@@ -25,7 +25,9 @@
     projects: [],
     workspace: {
       lastRunningProjectIds: [],
+      savedWorkspaces: [],
     },
+    selectedWorkspaceId: '',
     selectedId: null,
     draft: null,
     scripts: [],
@@ -109,6 +111,16 @@
         diagnosisTimeline:
           project.runtime?.diagnosisTimeline || project.runtime?.diagnosis?.timeline || [],
       },
+    };
+  }
+
+  function normalizeWorkspaceForView(workspace = {}) {
+    return {
+      lastRunningProjectIds: Array.isArray(workspace.lastRunningProjectIds)
+        ? workspace.lastRunningProjectIds
+        : [],
+      savedWorkspaces: Array.isArray(workspace.savedWorkspaces) ? workspace.savedWorkspaces : [],
+      updatedAt: workspace.updatedAt || null,
     };
   }
 
@@ -309,7 +321,13 @@
     }
 
     if (state.api.getWorkspace) {
-      state.workspace = await state.api.getWorkspace();
+      state.workspace = normalizeWorkspaceForView(await state.api.getWorkspace());
+      if (
+        state.selectedWorkspaceId &&
+        !state.workspace.savedWorkspaces.some((profile) => profile.id === state.selectedWorkspaceId)
+      ) {
+        state.selectedWorkspaceId = '';
+      }
     }
 
     if (
@@ -346,9 +364,25 @@
 
   function hasResumableWorkspace() {
     const savedIds = new Set(state.projects.map((project) => project.id));
-    return (state.workspace.lastRunningProjectIds || []).some((projectId) =>
-      savedIds.has(projectId)
+    const selected = selectedWorkspaceProfile();
+    const projectIds = selected?.projectIds || state.workspace.lastRunningProjectIds || [];
+    return projectIds.some((projectId) => savedIds.has(projectId));
+  }
+
+  function selectedWorkspaceProfile() {
+    if (!state.selectedWorkspaceId) {
+      return null;
+    }
+    return (
+      (state.workspace.savedWorkspaces || []).find(
+        (profile) => profile.id === state.selectedWorkspaceId
+      ) || null
     );
+  }
+
+  function workspaceProjectCount(profile) {
+    const savedIds = new Set(state.projects.map((project) => project.id));
+    return (profile?.projectIds || []).filter((projectId) => savedIds.has(projectId)).length;
   }
 
   function renderProjectList() {
@@ -776,7 +810,46 @@
   function updateWorkspaceActions() {
     const active = activeProjects();
     const hasProjects = state.projects.length > 0;
+    const profiles = state.workspace.savedWorkspaces || [];
+    if (!state.selectedWorkspaceId && profiles.length === 1) {
+      state.selectedWorkspaceId = profiles[0].id;
+    }
     const resumable = hasResumableWorkspace();
+    if (state.elements.workspaceSelect) {
+      const previousValue = state.selectedWorkspaceId;
+      state.elements.workspaceSelect.textContent = '';
+
+      const lastOption = document.createElement('option');
+      lastOption.value = '';
+      lastOption.textContent = 'Last running workspace';
+      state.elements.workspaceSelect.appendChild(lastOption);
+
+      profiles.forEach((profile) => {
+        const option = document.createElement('option');
+        option.value = profile.id;
+        option.textContent = `${profile.name} (${workspaceProjectCount(profile)})`;
+        state.elements.workspaceSelect.appendChild(option);
+      });
+
+      if (profiles.some((profile) => profile.id === previousValue)) {
+        state.elements.workspaceSelect.value = previousValue;
+      } else {
+        state.selectedWorkspaceId = '';
+        state.elements.workspaceSelect.value = '';
+      }
+      if (
+        state.elements.workspaceNameInput &&
+        document.activeElement !== state.elements.workspaceNameInput
+      ) {
+        state.elements.workspaceNameInput.value = selectedWorkspaceProfile()?.name || '';
+      }
+      state.elements.workspaceSelect.hidden = profiles.length <= 1;
+      state.elements.workspaceSelect.disabled = active.length > 0 || profiles.length === 0;
+    }
+    if (state.elements.saveWorkspaceBtn) {
+      state.elements.saveWorkspaceBtn.disabled =
+        active.length === 0 && !(state.workspace.lastRunningProjectIds || []).length;
+    }
     if (state.elements.resumeWorkspaceBtn) {
       state.elements.resumeWorkspaceBtn.disabled = active.length > 0 || !resumable;
     }
@@ -1051,7 +1124,10 @@
 
     try {
       setStatus(labels[actionName] || 'Updating workspace.');
-      const result = await state.api[actionName]();
+      const result =
+        actionName === 'resumeWorkspace'
+          ? await state.api.resumeWorkspace(state.selectedWorkspaceId || null)
+          : await state.api[actionName]();
       if (result?.workspace) {
         state.workspace = result.workspace;
       }
@@ -1070,6 +1146,41 @@
     } catch (error) {
       showError(error);
     }
+  }
+
+  async function saveWorkspaceProfile() {
+    if (!state.api?.saveWorkspaceProfile) {
+      throw new Error('Named workspaces are unavailable.');
+    }
+
+    const activeIds = activeProjects().map((project) => project.id);
+    const fallbackIds = state.workspace.lastRunningProjectIds || [];
+    const projectIds = activeIds.length > 0 ? activeIds : fallbackIds;
+    if (projectIds.length === 0) {
+      setStatus('Start projects before saving a workspace.', 'error');
+      return;
+    }
+
+    const defaultName =
+      selectedWorkspaceProfile()?.name ||
+      projectIds
+        .map((projectId) => state.projects.find((project) => project.id === projectId)?.name)
+        .filter(Boolean)
+        .slice(0, 2)
+        .join(' + ') ||
+      'Workspace';
+    const name = state.elements.workspaceNameInput.value.trim() || defaultName;
+
+    const result = await state.api.saveWorkspaceProfile({
+      id: state.selectedWorkspaceId || undefined,
+      name,
+      projectIds,
+    });
+    state.workspace = normalizeWorkspaceForView(result.workspace);
+    state.selectedWorkspaceId = result.profile.id;
+    state.elements.workspaceNameInput.value = result.profile.name;
+    await loadProjects();
+    setStatus(`Saved workspace ${result.profile.name}.`);
   }
 
   function closePreviewInMain() {
@@ -1287,6 +1398,14 @@
     state.elements.resumeWorkspaceBtn.addEventListener('click', () =>
       runWorkspaceAction('resumeWorkspace').catch(showError)
     );
+    state.elements.saveWorkspaceBtn.addEventListener('click', () =>
+      saveWorkspaceProfile().catch(showError)
+    );
+    state.elements.workspaceSelect.addEventListener('change', () => {
+      state.selectedWorkspaceId = state.elements.workspaceSelect.value;
+      state.elements.workspaceNameInput.value = selectedWorkspaceProfile()?.name || '';
+      updateWorkspaceActions();
+    });
     state.elements.startAllProjectsBtn.addEventListener('click', () =>
       runWorkspaceAction('startAllProjects').catch(showError)
     );
@@ -1360,6 +1479,9 @@
       'saveAndStartBtn',
       'deleteProjectBtn',
       'resumeWorkspaceBtn',
+      'saveWorkspaceBtn',
+      'workspaceSelect',
+      'workspaceNameInput',
       'startAllProjectsBtn',
       'stopAllProjectsBtn',
       'refreshBtn',

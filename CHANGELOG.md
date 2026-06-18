@@ -5,6 +5,30 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] - 2026-06-16
+
+### Added
+
+- Named workspace profiles so a saved set of localhost projects can be resumed
+  directly instead of relying only on the last running set.
+- **Save Workspace** toolbar action and workspace selector for choosing saved
+  profiles.
+
+### Changed
+
+- Refreshed the renderer from a literal Windows 95 treatment toward a cleaner
+  retro control-room interface with stronger status badges, clearer panels, and
+  a more prominent preview surface.
+- First-run empty state now gives more context before the sample/add-project
+  choices.
+- CI now treats the Electron smoke test as a required gate, and release builds
+  run lint, format check, and smoke verification before publishing.
+
+### Fixed
+
+- App quit now waits for running project cleanup before continuing shutdown,
+  reducing the chance of orphaned local dev processes.
+
 ## [3.0.0] - 2026-06-15
 
 ### Added

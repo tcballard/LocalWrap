@@ -17,6 +17,8 @@ same working set without terminal juggling.
   autostart, and open-on-ready preferences in one place.
 - **Resume Workspace** — restart the last set of local projects you had running
   so tomorrow's workspace comes back in one action.
+- **Named workspaces** — save a familiar stack of projects and resume that
+  profile directly when you switch context.
 - **Guided project import** — pick a repo and LocalWrap suggests the name,
   command, port, and URL from common package scripts.
 - **Process control** — start/stop/restart dev commands with `PORT` injected and

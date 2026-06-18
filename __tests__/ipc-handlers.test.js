@@ -229,6 +229,44 @@ describe('createIpcHandlers', () => {
     );
   });
 
+  test('workspace:saveProfile captures the active project set', async () => {
+    const { invoke } = createHandlers();
+    const project = await startedProject(invoke);
+
+    const result = await invoke('workspace:saveProfile', { name: 'Morning stack' });
+
+    expect(result.profile).toMatchObject({
+      name: 'Morning stack',
+      projectIds: [project.id],
+    });
+    expect(result.workspace.savedWorkspaces).toHaveLength(1);
+    expect(fixture.emitProjectListChanged).toHaveBeenCalled();
+  });
+
+  test('workspace:resume starts the selected saved workspace profile', async () => {
+    const { invoke } = createHandlers();
+    const project = await createSavedProject(invoke);
+    const { profile } = await invoke('workspace:saveProfile', {
+      name: 'Saved stack',
+      projectIds: [project.id],
+    });
+
+    const result = await invoke('workspace:resume', profile.id);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(result.results).toHaveLength(1);
+    expect(fixture.projectLifecycle.getState(project.id).status).toBe('ready');
+    expect(result.workspace.savedWorkspaces[0].lastStartedAt).toBeTruthy();
+  });
+
+  test('workspace:resume rejects an unknown saved workspace profile', async () => {
+    const { invoke } = createHandlers();
+
+    await expect(invoke('workspace:resume', 'missing-workspace')).rejects.toThrow(
+      /Workspace not found/
+    );
+  });
+
   test('preview resize, reload, and close pass through to the controller', async () => {
     const { invoke } = createHandlers();
 

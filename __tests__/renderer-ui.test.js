@@ -41,13 +41,24 @@ describe('renderer UI surface', () => {
   });
 
   test('v3 workspace controls are exposed in the toolbar', () => {
-    for (const id of ['resumeWorkspaceBtn', 'startAllProjectsBtn', 'stopAllProjectsBtn']) {
+    for (const id of [
+      'resumeWorkspaceBtn',
+      'workspaceSelect',
+      'workspaceNameInput',
+      'saveWorkspaceBtn',
+      'startAllProjectsBtn',
+      'stopAllProjectsBtn',
+    ]) {
       expect(html).toContain(`id="${id}"`);
     }
 
     expect(html).toContain('Resume Workspace');
+    expect(html).toContain('Save Workspace');
+    expect(html).toContain('Last running workspace');
+    expect(html).toContain('Workspace name');
     expect(html).toContain('Start All');
     expect(html).toContain('Stop All');
+    expect(js).toContain('saveWorkspaceProfile');
   });
 
   test('project form exposes inline validation message targets', () => {

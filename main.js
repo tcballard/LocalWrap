@@ -26,6 +26,8 @@ let projectLifecycle;
 let previewController;
 let ipcApi;
 let lastPersistedWorkspaceKey = '';
+let quitCleanupComplete = false;
+let quitCleanupPromise = null;
 
 // Lets tests isolate their own config directory; harmless otherwise.
 if (process.env.LOCALWRAP_USER_DATA) {
@@ -302,7 +304,7 @@ function createWindow() {
     minHeight: 620,
     resizable: true,
     center: true,
-    backgroundColor: '#f0f0f0',
+    backgroundColor: '#eef1f3',
     autoHideMenuBar: true,
     show: false,
     icon: path.join(__dirname, 'assets', 'icon.png'),
@@ -616,11 +618,25 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', (event) => {
   app.isQuiting = true;
-  if (projectLifecycle) {
-    persistActiveWorkspaceSnapshot();
-    projectLifecycle.stopAll().catch((error) => console.error('Failed to stop projects:', error));
+  if (!projectLifecycle || quitCleanupComplete) {
+    return;
+  }
+
+  event.preventDefault();
+  if (!quitCleanupPromise) {
+    quitCleanupPromise = (async () => {
+      try {
+        persistActiveWorkspaceSnapshot();
+        await projectLifecycle.stopAll();
+      } catch (error) {
+        console.error('Failed to stop projects:', error);
+      } finally {
+        quitCleanupComplete = true;
+        app.quit();
+      }
+    })();
   }
 });
 
