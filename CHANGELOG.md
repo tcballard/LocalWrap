@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.2.0] - 2026-06-22
+
+### Added
+
+- Team workspace packs can now be imported from and exported to
+  `.localwrap/workspace.json`, giving repos a portable, reviewable way to define
+  LocalWrap projects and named workspace profiles.
+
 ## [3.1.0] - 2026-06-16
 
 ### Added

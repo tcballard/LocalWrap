@@ -178,6 +178,70 @@ describe('ProjectStore', () => {
     });
   });
 
+  test('imports a workspace pack without duplicating projects or profiles', () => {
+    let nextId = 1;
+    const store = new ProjectStore({
+      filePath: fixture.filePath,
+      idFactory: () => `imported-${nextId++}`,
+      now: () => `2026-06-05T00:00:0${tick++}.000Z`,
+    });
+    const pack = {
+      packPath: path.join(fixture.root, '.localwrap', 'workspace.json'),
+      rootDir: fixture.root,
+      projects: [
+        {
+          id: 'web',
+          name: 'Web',
+          cwd: fixture.cwd,
+          command: 'npm run dev',
+          port: 5173,
+          url: 'http://localhost:5173',
+          autostart: false,
+          openOnReady: true,
+        },
+      ],
+      workspaces: [{ id: 'default', name: 'Demo stack', projects: ['web'] }],
+    };
+
+    const first = store.importWorkspacePack(pack);
+    const second = store.importWorkspacePack({
+      ...pack,
+      projects: [
+        { ...pack.projects[0], name: 'Web App', port: 5174, url: 'http://localhost:5174' },
+      ],
+    });
+
+    expect(first.importedProjectIds).toEqual(['imported-1']);
+    expect(first.importedWorkspaceIds).toEqual(['imported-2']);
+    expect(second.importedProjectIds).toEqual([]);
+    expect(second.updatedProjectIds).toEqual(['imported-1']);
+    expect(second.updatedWorkspaceIds).toEqual(['imported-2']);
+    expect(store.list()).toEqual([
+      expect.objectContaining({
+        id: 'imported-1',
+        name: 'Web App',
+        port: 5174,
+        source: {
+          type: 'workspace-pack',
+          packPath: pack.packPath,
+          packProjectId: 'web',
+        },
+      }),
+    ]);
+    expect(store.getWorkspace().savedWorkspaces).toEqual([
+      expect.objectContaining({
+        id: 'imported-2',
+        name: 'Demo stack',
+        projectIds: ['imported-1'],
+        source: {
+          type: 'workspace-pack',
+          packPath: pack.packPath,
+          packWorkspaceId: 'default',
+        },
+      }),
+    ]);
+  });
+
   test('preserves corrupt project data when starting fresh', () => {
     fs.writeFileSync(fixture.filePath, '{not-json');
     const store = createStore();

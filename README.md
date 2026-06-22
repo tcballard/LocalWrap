@@ -19,6 +19,8 @@ same working set without terminal juggling.
   so tomorrow's workspace comes back in one action.
 - **Named workspaces** — save a familiar stack of projects and resume that
   profile directly when you switch context.
+- **Team workspace packs** — import or export a repo-owned
+  `.localwrap/workspace.json` so a project can describe the local stack it needs.
 - **Guided project import** — pick a repo and LocalWrap suggests the name,
   command, port, and URL from common package scripts.
 - **Process control** — start/stop/restart dev commands with `PORT` injected and
@@ -90,6 +92,35 @@ logs, readiness, **Preview**, and **Open**.
 
 When running from source, you can still use **Add Project** and import
 `examples/sample-project` manually.
+
+## Team Workspace Packs
+
+LocalWrap can import and export a portable workspace pack at
+`.localwrap/workspace.json`. This lets a repo carry its local development stack
+in a reviewable JSON file. Importing a pack saves the projects and workspace
+profiles, but does not start commands automatically.
+
+```json
+{
+  "localwrap": 1,
+  "name": "Example stack",
+  "projects": [
+    {
+      "id": "web",
+      "name": "Web",
+      "path": "apps/web",
+      "command": "npm run dev",
+      "port": 5173,
+      "url": "http://localhost:5173"
+    }
+  ],
+  "workspaces": [{ "id": "default", "name": "Default", "projects": ["web"] }]
+}
+```
+
+Project paths are relative to the selected repo folder and must stay inside it.
+Commands still pass through LocalWrap's command allowlist and local URL
+validation before they are saved.
 
 ## Build distributables
 

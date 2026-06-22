@@ -61,6 +61,9 @@ describe('preload contextBridge API', () => {
       'stopAllProjects',
       'resumeWorkspace',
       'saveWorkspaceProfile',
+      'inspectWorkspacePack',
+      'importWorkspacePack',
+      'exportWorkspacePack',
       'openProject',
       'previewProject',
       'resizeProjectPreview',
@@ -135,6 +138,15 @@ describe('preload contextBridge API', () => {
     expect(mockInvoke).toHaveBeenLastCalledWith('workspace:saveProfile', {
       name: 'Morning stack',
     });
+
+    exposed.api.inspectWorkspacePack('/tmp/repo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:inspectPack', '/tmp/repo');
+
+    exposed.api.importWorkspacePack('/tmp/repo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:importPack', '/tmp/repo');
+
+    exposed.api.exportWorkspacePack('/tmp/repo');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:exportPack', '/tmp/repo');
 
     exposed.api.openProject('p1');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:open', 'p1');

@@ -7,9 +7,11 @@ describe('renderer UI surface', () => {
 
   test('first-run empty state has sample and add project actions', () => {
     expect(html).toContain('id="emptySampleProjectBtn"');
+    expect(html).toContain('id="emptyImportWorkspaceBtn"');
     expect(html).toContain('id="emptyAddProjectBtn"');
     expect(html).toContain('class="empty-task"');
     expect(html).toContain('Try Sample Project');
+    expect(html).toContain('Import Workspace');
     expect(html).toContain('Add Project');
     expect(html.indexOf('id="emptySampleProjectBtn"')).toBeLessThan(
       html.indexOf('id="emptyAddProjectBtn"')
@@ -46,6 +48,8 @@ describe('renderer UI surface', () => {
       'workspaceSelect',
       'workspaceNameInput',
       'saveWorkspaceBtn',
+      'importWorkspaceBtn',
+      'exportWorkspaceBtn',
       'startAllProjectsBtn',
       'stopAllProjectsBtn',
     ]) {
@@ -54,11 +58,15 @@ describe('renderer UI surface', () => {
 
     expect(html).toContain('Resume Workspace');
     expect(html).toContain('Save Workspace');
+    expect(html).toContain('Import Workspace');
+    expect(html).toContain('Export Workspace');
     expect(html).toContain('Last running workspace');
     expect(html).toContain('Workspace name');
     expect(html).toContain('Start All');
     expect(html).toContain('Stop All');
     expect(js).toContain('saveWorkspaceProfile');
+    expect(js).toContain('importWorkspacePackFromDirectory');
+    expect(js).toContain('exportWorkspacePackToDirectory');
   });
 
   test('project form exposes inline validation message targets', () => {

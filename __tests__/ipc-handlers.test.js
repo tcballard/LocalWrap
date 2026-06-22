@@ -267,6 +267,69 @@ describe('createIpcHandlers', () => {
     );
   });
 
+  test('workspace pack inspect and import save a repo-defined stack', async () => {
+    fs.mkdirSync(path.join(fixture.root, '.localwrap'));
+    fs.writeFileSync(
+      path.join(fixture.root, '.localwrap', 'workspace.json'),
+      JSON.stringify({
+        localwrap: 1,
+        name: 'Fixture stack',
+        projects: [
+          {
+            id: 'demo',
+            name: 'Demo',
+            path: 'demo-app',
+            command: 'npm run dev',
+            port: 5173,
+          },
+        ],
+        workspaces: [{ id: 'default', name: 'Default', projects: ['demo'] }],
+      })
+    );
+    const { invoke } = createHandlers();
+
+    const summary = await invoke('workspace:inspectPack', fixture.root);
+    const result = await invoke('workspace:importPack', fixture.root);
+
+    expect(summary).toMatchObject({
+      name: 'Fixture stack',
+      projects: [{ name: 'Demo', command: 'npm run dev', cwd: fixture.cwd }],
+    });
+    expect(result.projects).toHaveLength(1);
+    expect(result.workspace.savedWorkspaces[0]).toMatchObject({
+      name: 'Default',
+      projectIds: [result.projects[0].id],
+    });
+    expect(fixture.projectStore.list()[0]).toMatchObject({
+      cwd: fixture.cwd,
+      source: {
+        type: 'workspace-pack',
+        packProjectId: 'demo',
+      },
+    });
+    expect(fixture.emitProjectListChanged).toHaveBeenCalled();
+  });
+
+  test('workspace:exportPack writes the current saved projects as a repo workspace pack', async () => {
+    const { invoke } = createHandlers();
+    await createSavedProject(invoke);
+
+    const result = await invoke('workspace:exportPack', fixture.root);
+    const pack = JSON.parse(fs.readFileSync(result.packPath, 'utf8'));
+
+    expect(result).toMatchObject({
+      projectCount: 1,
+      workspaceCount: 1,
+      skippedProjects: [],
+    });
+    expect(pack).toMatchObject({
+      localwrap: 1,
+      name: path.basename(fixture.root),
+      projects: [{ name: 'Demo', path: 'demo-app', command: 'npm run dev' }],
+      workspaces: [{ id: 'default', projects: [expect.any(String)] }],
+    });
+  });
+
   test('preview resize, reload, and close pass through to the controller', async () => {
     const { invoke } = createHandlers();
 

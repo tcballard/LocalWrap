@@ -850,6 +850,9 @@
       state.elements.saveWorkspaceBtn.disabled =
         active.length === 0 && !(state.workspace.lastRunningProjectIds || []).length;
     }
+    if (state.elements.exportWorkspaceBtn) {
+      state.elements.exportWorkspaceBtn.disabled = !hasProjects;
+    }
     if (state.elements.resumeWorkspaceBtn) {
       state.elements.resumeWorkspaceBtn.disabled = active.length > 0 || !resumable;
     }
@@ -955,6 +958,65 @@
     } else {
       setStatus(`Ready to save ${profile.name}.`);
     }
+  }
+
+  async function importWorkspacePackFromDirectory() {
+    if (!state.api?.inspectWorkspacePack || !state.api?.importWorkspacePack) {
+      throw new Error('Workspace pack import is unavailable.');
+    }
+
+    const rootDir = await state.api.selectDirectory();
+    if (!rootDir) return;
+
+    setStatus('Reading workspace pack...');
+    const summary = await state.api.inspectWorkspacePack(rootDir);
+    const projectLines = summary.projects
+      .slice(0, 5)
+      .map((project) => `${project.name} - ${project.command}`)
+      .join('\n');
+    const moreProjects =
+      summary.projects.length > 5 ? `\n...and ${summary.projects.length - 5} more` : '';
+    const ok = window.confirm(
+      `Import ${summary.name}?\n\n${summary.projects.length} project(s), ${
+        summary.workspaces.length
+      } workspace profile(s).\n\n${projectLines}${moreProjects}\n\nCommands will be saved but not started.`
+    );
+    if (!ok) return;
+
+    resetPreviewState();
+    closePreviewInMain();
+    state.draft = null;
+    state.validation = null;
+    state.diagnosis = null;
+    state.commandVisible = false;
+
+    const result = await state.api.importWorkspacePack(rootDir);
+    state.workspace = normalizeWorkspaceForView(result.workspace);
+    state.selectedWorkspaceId =
+      result.importedWorkspaceIds?.[0] || result.updatedWorkspaceIds?.[0] || '';
+    state.selectedId = result.importedProjectIds?.[0] || result.updatedProjectIds?.[0] || null;
+    await loadProjects(result.projects);
+    setStatus(
+      `Imported ${result.importedProjectIds.length} project(s), updated ${result.updatedProjectIds.length}.`
+    );
+  }
+
+  async function exportWorkspacePackToDirectory() {
+    if (!state.api?.exportWorkspacePack) {
+      throw new Error('Workspace pack export is unavailable.');
+    }
+
+    const rootDir = await state.api.selectDirectory();
+    if (!rootDir) return;
+
+    setStatus('Writing workspace pack...');
+    const result = await state.api.exportWorkspacePack(rootDir);
+    const skipped = result.skippedProjects?.length || 0;
+    const skippedText = skipped > 0 ? ` Skipped ${skipped} project(s) outside that folder.` : '';
+    setStatus(
+      `Exported ${result.projectCount} project(s) to ${result.packPath}.${skippedText}`,
+      skipped > 0 ? 'error' : undefined
+    );
   }
 
   async function createSampleProjectFromBundle() {
@@ -1384,8 +1446,14 @@
     state.elements.addProjectBtn.addEventListener('click', () =>
       importProjectFromDirectory().catch(showError)
     );
+    state.elements.importWorkspaceBtn.addEventListener('click', () =>
+      importWorkspacePackFromDirectory().catch(showError)
+    );
     state.elements.emptyAddProjectBtn.addEventListener('click', () =>
       importProjectFromDirectory().catch(showError)
+    );
+    state.elements.emptyImportWorkspaceBtn.addEventListener('click', () =>
+      importWorkspacePackFromDirectory().catch(showError)
     );
     state.elements.emptySampleProjectBtn.addEventListener('click', () =>
       createSampleProjectFromBundle().catch(showError)
@@ -1400,6 +1468,9 @@
     );
     state.elements.saveWorkspaceBtn.addEventListener('click', () =>
       saveWorkspaceProfile().catch(showError)
+    );
+    state.elements.exportWorkspaceBtn.addEventListener('click', () =>
+      exportWorkspacePackToDirectory().catch(showError)
     );
     state.elements.workspaceSelect.addEventListener('change', () => {
       state.selectedWorkspaceId = state.elements.workspaceSelect.value;
@@ -1471,7 +1542,9 @@
       'emptyState',
       'projectDetail',
       'addProjectBtn',
+      'importWorkspaceBtn',
       'emptyAddProjectBtn',
+      'emptyImportWorkspaceBtn',
       'emptySampleProjectBtn',
       'draftNotice',
       'runProgress',
@@ -1480,6 +1553,7 @@
       'deleteProjectBtn',
       'resumeWorkspaceBtn',
       'saveWorkspaceBtn',
+      'exportWorkspaceBtn',
       'workspaceSelect',
       'workspaceNameInput',
       'startAllProjectsBtn',
