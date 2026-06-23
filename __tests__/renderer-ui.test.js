@@ -45,6 +45,7 @@ describe('renderer UI surface', () => {
   test('v3 workspace controls are exposed in the toolbar', () => {
     for (const id of [
       'resumeWorkspaceBtn',
+      'startReadyWorkspaceBtn',
       'workspaceSelect',
       'workspaceNameInput',
       'saveWorkspaceBtn',
@@ -57,6 +58,7 @@ describe('renderer UI surface', () => {
     }
 
     expect(html).toContain('Resume Workspace');
+    expect(html).toContain('Start Ready');
     expect(html).toContain('Save Workspace');
     expect(html).toContain('Import Workspace');
     expect(html).toContain('Export Workspace');
@@ -65,8 +67,30 @@ describe('renderer UI surface', () => {
     expect(html).toContain('Start All');
     expect(html).toContain('Stop All');
     expect(js).toContain('saveWorkspaceProfile');
+    expect(js).toContain('startReadyWorkspace');
     expect(js).toContain('importWorkspacePackFromDirectory');
     expect(js).toContain('exportWorkspacePackToDirectory');
+  });
+
+  test('v3.3 Workspace Doctor surface is available above project setup', () => {
+    for (const id of [
+      'workspaceDoctorPanel',
+      'workspaceDoctorBadge',
+      'workspaceDoctorSummary',
+      'workspaceDoctorTarget',
+      'workspaceDoctorTotals',
+      'workspaceDoctorChecks',
+      'workspaceDoctorProjects',
+      'refreshWorkspaceDoctorBtn',
+    ]) {
+      expect(html).toContain(`id="${id}"`);
+    }
+
+    expect(html.indexOf('id="workspaceDoctorPanel"')).toBeLessThan(html.indexOf('id="setupPanel"'));
+    expect(html).toContain('Workspace Doctor');
+    expect(html).toContain('Check Workspace');
+    expect(js).toContain('renderWorkspaceDoctor');
+    expect(js).toContain('diagnoseWorkspace');
   });
 
   test('project form exposes inline validation message targets', () => {

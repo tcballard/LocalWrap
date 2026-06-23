@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
 
   listProjects: () => ipcRenderer.invoke('project:list'),
   getWorkspace: () => ipcRenderer.invoke('workspace:get'),
+  diagnoseWorkspace: (workspaceId = null) => ipcRenderer.invoke('workspace:diagnose', workspaceId),
   inspectDirectory: (workingDir) => ipcRenderer.invoke('project:inspectDirectory', workingDir),
   validateProjectDraft: (draft) => ipcRenderer.invoke('project:validateDraft', draft),
   diagnoseProjectDraft: (draft) => ipcRenderer.invoke('project:diagnoseDraft', draft),
@@ -42,6 +43,8 @@ contextBridge.exposeInMainWorld('localwrapAPI', {
   startAllProjects: () => ipcRenderer.invoke('project:startAll'),
   stopAllProjects: () => ipcRenderer.invoke('project:stopAll'),
   resumeWorkspace: (workspaceId = null) => ipcRenderer.invoke('workspace:resume', workspaceId),
+  startReadyWorkspace: (workspaceId = null) =>
+    ipcRenderer.invoke('workspace:startReady', workspaceId),
   saveWorkspaceProfile: (workspace) => ipcRenderer.invoke('workspace:saveProfile', workspace),
   inspectWorkspacePack: (rootDir) => ipcRenderer.invoke('workspace:inspectPack', rootDir),
   importWorkspacePack: (rootDir) => ipcRenderer.invoke('workspace:importPack', rootDir),

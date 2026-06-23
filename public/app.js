@@ -27,6 +27,7 @@
       lastRunningProjectIds: [],
       savedWorkspaces: [],
     },
+    workspaceDiagnosis: null,
     selectedWorkspaceId: '',
     selectedId: null,
     draft: null,
@@ -95,6 +96,29 @@
     };
   }
 
+  function createDefaultWorkspaceDiagnosis() {
+    return {
+      status: 'empty',
+      summary: 'No saved projects to diagnose.',
+      target: {
+        kind: 'all-projects',
+        profileId: null,
+        name: 'Saved projects',
+        projectIds: [],
+      },
+      totals: {
+        projects: 0,
+        ready: 0,
+        warnings: 0,
+        blockers: 0,
+      },
+      startableProjectIds: [],
+      blockedProjectIds: [],
+      checks: [],
+      projects: [],
+    };
+  }
+
   function normalizeProjectForView(project) {
     return {
       ...project,
@@ -121,6 +145,30 @@
         : [],
       savedWorkspaces: Array.isArray(workspace.savedWorkspaces) ? workspace.savedWorkspaces : [],
       updatedAt: workspace.updatedAt || null,
+    };
+  }
+
+  function normalizeWorkspaceDiagnosisForView(diagnosis = {}) {
+    const fallback = createDefaultWorkspaceDiagnosis();
+    return {
+      ...fallback,
+      ...diagnosis,
+      target: {
+        ...fallback.target,
+        ...(diagnosis.target || {}),
+      },
+      totals: {
+        ...fallback.totals,
+        ...(diagnosis.totals || {}),
+      },
+      startableProjectIds: Array.isArray(diagnosis.startableProjectIds)
+        ? diagnosis.startableProjectIds
+        : [],
+      blockedProjectIds: Array.isArray(diagnosis.blockedProjectIds)
+        ? diagnosis.blockedProjectIds
+        : [],
+      checks: Array.isArray(diagnosis.checks) ? diagnosis.checks : [],
+      projects: Array.isArray(diagnosis.projects) ? diagnosis.projects : [],
     };
   }
 
@@ -328,6 +376,7 @@
       ) {
         state.selectedWorkspaceId = '';
       }
+      syncDefaultWorkspaceSelection();
     }
 
     if (
@@ -347,6 +396,7 @@
       }
     }
 
+    await loadWorkspaceDiagnosis();
     render();
     scheduleValidation(0);
   }
@@ -354,12 +404,20 @@
   function render() {
     renderProjectList();
     renderDetail();
+    renderWorkspaceDoctor();
     updateWorkspaceActions();
     updateStatusRight();
   }
 
   function activeProjects() {
     return state.projects.filter((project) => isProjectActive(project));
+  }
+
+  function syncDefaultWorkspaceSelection() {
+    const profiles = state.workspace.savedWorkspaces || [];
+    if (!state.selectedWorkspaceId && profiles.length === 1) {
+      state.selectedWorkspaceId = profiles[0].id;
+    }
   }
 
   function hasResumableWorkspace() {
@@ -383,6 +441,24 @@
   function workspaceProjectCount(profile) {
     const savedIds = new Set(state.projects.map((project) => project.id));
     return (profile?.projectIds || []).filter((projectId) => savedIds.has(projectId)).length;
+  }
+
+  async function loadWorkspaceDiagnosis({ rerender = false } = {}) {
+    if (!state.api?.diagnoseWorkspace) {
+      state.workspaceDiagnosis = createDefaultWorkspaceDiagnosis();
+      return state.workspaceDiagnosis;
+    }
+
+    state.workspaceDiagnosis = normalizeWorkspaceDiagnosisForView(
+      await state.api.diagnoseWorkspace(state.selectedWorkspaceId || null)
+    );
+
+    if (rerender) {
+      renderWorkspaceDoctor();
+      updateWorkspaceActions();
+    }
+
+    return state.workspaceDiagnosis;
   }
 
   function renderProjectList() {
@@ -420,6 +496,82 @@
       row.appendChild(dot);
       row.appendChild(text);
       list.appendChild(row);
+    });
+  }
+
+  function workspaceDoctorStatusLabel(status) {
+    const labels = {
+      ready: 'Ready',
+      attention: 'Attention',
+      blocked: 'Blocked',
+      empty: 'Empty',
+    };
+    return labels[status] || 'Checking';
+  }
+
+  function renderWorkspaceDoctor() {
+    const panel = state.elements.workspaceDoctorPanel;
+    if (!panel) return;
+
+    const diagnosis = state.workspaceDiagnosis || createDefaultWorkspaceDiagnosis();
+    panel.hidden = state.projects.length === 0;
+    panel.className = `workspace-doctor ${diagnosis.status || 'empty'}`;
+    state.elements.workspaceDoctorBadge.className = `badge ${diagnosis.status || 'empty'}`;
+    state.elements.workspaceDoctorBadge.textContent = workspaceDoctorStatusLabel(diagnosis.status);
+    state.elements.workspaceDoctorSummary.textContent = diagnosis.summary || 'No diagnosis yet.';
+    state.elements.workspaceDoctorTarget.textContent = diagnosis.target?.name || 'Saved projects';
+    state.elements.workspaceDoctorTotals.textContent = `${diagnosis.totals.projects} project(s) | ${diagnosis.totals.ready} ready | ${diagnosis.totals.warnings} attention | ${diagnosis.totals.blockers} blocked`;
+
+    state.elements.workspaceDoctorChecks.textContent = '';
+    diagnosis.checks.forEach((check) => {
+      const row = document.createElement('div');
+      row.className = `workspace-doctor-check ${check.status || 'pending'}`;
+
+      const stateEl = document.createElement('span');
+      stateEl.className = 'workspace-doctor-state';
+      stateEl.textContent = DOCTOR_ICONS[check.status] || '-';
+
+      const labelEl = document.createElement('span');
+      labelEl.className = 'workspace-doctor-label';
+      labelEl.textContent = check.label;
+
+      const messageEl = document.createElement('span');
+      messageEl.className = 'workspace-doctor-message';
+      messageEl.textContent = check.message;
+
+      row.appendChild(stateEl);
+      row.appendChild(labelEl);
+      row.appendChild(messageEl);
+      state.elements.workspaceDoctorChecks.appendChild(row);
+    });
+
+    state.elements.workspaceDoctorProjects.textContent = '';
+    diagnosis.projects.forEach((project) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = `workspace-doctor-project ${project.status || 'ready'}`;
+      row.addEventListener('click', () => {
+        if (state.projects.some((savedProject) => savedProject.id === project.id)) {
+          setSelected(project.id);
+        }
+      });
+
+      const name = document.createElement('span');
+      name.className = 'workspace-doctor-project-name';
+      name.textContent = project.name;
+
+      const status = document.createElement('span');
+      status.className = 'workspace-doctor-project-status';
+      status.textContent = workspaceDoctorStatusLabel(project.status);
+
+      const summary = document.createElement('span');
+      summary.className = 'workspace-doctor-project-summary';
+      summary.textContent = project.summary;
+
+      row.appendChild(name);
+      row.appendChild(status);
+      row.appendChild(summary);
+      state.elements.workspaceDoctorProjects.appendChild(row);
     });
   }
 
@@ -811,10 +963,9 @@
     const active = activeProjects();
     const hasProjects = state.projects.length > 0;
     const profiles = state.workspace.savedWorkspaces || [];
-    if (!state.selectedWorkspaceId && profiles.length === 1) {
-      state.selectedWorkspaceId = profiles[0].id;
-    }
+    syncDefaultWorkspaceSelection();
     const resumable = hasResumableWorkspace();
+    const startableCount = state.workspaceDiagnosis?.startableProjectIds?.length || 0;
     if (state.elements.workspaceSelect) {
       const previousValue = state.selectedWorkspaceId;
       state.elements.workspaceSelect.textContent = '';
@@ -855,6 +1006,10 @@
     }
     if (state.elements.resumeWorkspaceBtn) {
       state.elements.resumeWorkspaceBtn.disabled = active.length > 0 || !resumable;
+    }
+    if (state.elements.startReadyWorkspaceBtn) {
+      state.elements.startReadyWorkspaceBtn.disabled =
+        active.length > 0 || !hasProjects || startableCount === 0;
     }
     if (state.elements.startAllProjectsBtn) {
       state.elements.startAllProjectsBtn.disabled = !hasProjects;
@@ -1180,6 +1335,7 @@
   async function runWorkspaceAction(actionName) {
     const labels = {
       resumeWorkspace: 'Resuming workspace.',
+      startReadyWorkspace: 'Starting ready projects.',
       startAllProjects: 'Starting all projects.',
       stopAllProjects: 'Stopping all projects.',
     };
@@ -1189,9 +1345,14 @@
       const result =
         actionName === 'resumeWorkspace'
           ? await state.api.resumeWorkspace(state.selectedWorkspaceId || null)
-          : await state.api[actionName]();
+          : actionName === 'startReadyWorkspace'
+            ? await state.api.startReadyWorkspace(state.selectedWorkspaceId || null)
+            : await state.api[actionName]();
       if (result?.workspace) {
         state.workspace = result.workspace;
+      }
+      if (result?.diagnosis) {
+        state.workspaceDiagnosis = normalizeWorkspaceDiagnosisForView(result.diagnosis);
       }
       if (result?.projects) {
         await loadProjects(result.projects);
@@ -1202,6 +1363,10 @@
       const failed = (result?.results || []).filter((item) => item.status === 'failed');
       if (failed.length > 0) {
         setStatus(`Workspace updated with ${failed.length} project(s) needing attention.`, 'error');
+      } else if (actionName === 'startReadyWorkspace' && result?.skippedBlockedProjectIds?.length) {
+        setStatus(
+          `Started ready projects. Skipped ${result.skippedBlockedProjectIds.length} blocked project(s).`
+        );
       } else {
         setStatus(labels[actionName] || 'Workspace updated.');
       }
@@ -1243,6 +1408,12 @@
     state.elements.workspaceNameInput.value = result.profile.name;
     await loadProjects();
     setStatus(`Saved workspace ${result.profile.name}.`);
+  }
+
+  async function refreshWorkspaceDoctor() {
+    setStatus('Checking workspace.');
+    await loadWorkspaceDiagnosis({ rerender: true });
+    setStatus(state.workspaceDiagnosis.summary);
   }
 
   function closePreviewInMain() {
@@ -1466,6 +1637,9 @@
     state.elements.resumeWorkspaceBtn.addEventListener('click', () =>
       runWorkspaceAction('resumeWorkspace').catch(showError)
     );
+    state.elements.startReadyWorkspaceBtn.addEventListener('click', () =>
+      runWorkspaceAction('startReadyWorkspace').catch(showError)
+    );
     state.elements.saveWorkspaceBtn.addEventListener('click', () =>
       saveWorkspaceProfile().catch(showError)
     );
@@ -1475,7 +1649,7 @@
     state.elements.workspaceSelect.addEventListener('change', () => {
       state.selectedWorkspaceId = state.elements.workspaceSelect.value;
       state.elements.workspaceNameInput.value = selectedWorkspaceProfile()?.name || '';
-      updateWorkspaceActions();
+      loadWorkspaceDiagnosis({ rerender: true }).catch(showError);
     });
     state.elements.startAllProjectsBtn.addEventListener('click', () =>
       runWorkspaceAction('startAllProjects').catch(showError)
@@ -1484,6 +1658,9 @@
       runWorkspaceAction('stopAllProjects').catch(showError)
     );
     state.elements.refreshBtn.addEventListener('click', () => loadProjects().catch(showError));
+    state.elements.refreshWorkspaceDoctorBtn.addEventListener('click', () =>
+      refreshWorkspaceDoctor().catch(showError)
+    );
     state.elements.toggleSetupBtn.addEventListener('click', () => toggleSection('setup'));
     state.elements.browseDirBtn.addEventListener('click', () => browseDirectory().catch(showError));
     state.elements.startProjectBtn.addEventListener('click', () =>
@@ -1552,10 +1729,19 @@
       'saveAndStartBtn',
       'deleteProjectBtn',
       'resumeWorkspaceBtn',
+      'startReadyWorkspaceBtn',
       'saveWorkspaceBtn',
       'exportWorkspaceBtn',
       'workspaceSelect',
       'workspaceNameInput',
+      'workspaceDoctorPanel',
+      'workspaceDoctorBadge',
+      'workspaceDoctorSummary',
+      'workspaceDoctorTarget',
+      'workspaceDoctorTotals',
+      'workspaceDoctorChecks',
+      'workspaceDoctorProjects',
+      'refreshWorkspaceDoctorBtn',
       'startAllProjectsBtn',
       'stopAllProjectsBtn',
       'refreshBtn',

@@ -47,6 +47,7 @@ describe('preload contextBridge API', () => {
     for (const method of [
       'listProjects',
       'getWorkspace',
+      'diagnoseWorkspace',
       'inspectDirectory',
       'validateProjectDraft',
       'diagnoseProjectDraft',
@@ -60,6 +61,7 @@ describe('preload contextBridge API', () => {
       'startAllProjects',
       'stopAllProjects',
       'resumeWorkspace',
+      'startReadyWorkspace',
       'saveWorkspaceProfile',
       'inspectWorkspacePack',
       'importWorkspacePack',
@@ -94,6 +96,9 @@ describe('preload contextBridge API', () => {
 
     exposed.api.getWorkspace();
     expect(mockInvoke).toHaveBeenLastCalledWith('workspace:get');
+
+    exposed.api.diagnoseWorkspace('workspace-1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:diagnose', 'workspace-1');
 
     exposed.api.inspectDirectory('/tmp/demo');
     expect(mockInvoke).toHaveBeenLastCalledWith('project:inspectDirectory', '/tmp/demo');
@@ -133,6 +138,9 @@ describe('preload contextBridge API', () => {
 
     exposed.api.resumeWorkspace('workspace-1');
     expect(mockInvoke).toHaveBeenLastCalledWith('workspace:resume', 'workspace-1');
+
+    exposed.api.startReadyWorkspace('workspace-1');
+    expect(mockInvoke).toHaveBeenLastCalledWith('workspace:startReady', 'workspace-1');
 
     exposed.api.saveWorkspaceProfile({ name: 'Morning stack' });
     expect(mockInvoke).toHaveBeenLastCalledWith('workspace:saveProfile', {

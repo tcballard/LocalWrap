@@ -206,7 +206,7 @@
 
       .detail {
         display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
+        grid-template-rows: auto auto minmax(0, 1fr);
         flex: 1;
         min-height: 0;
       }
@@ -575,6 +575,165 @@
         color: var(--muted);
       }
 
+      .workspace-doctor {
+        border-bottom: 1px solid var(--line);
+        background: #f8fafb;
+      }
+
+      .workspace-doctor[hidden] {
+        display: none;
+      }
+
+      .workspace-doctor-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        background: linear-gradient(180deg, #ffffff 0%, #edf4f8 100%);
+      }
+
+      .workspace-doctor-title {
+        margin-right: 8px;
+        color: var(--brand-strong);
+        font-weight: 600;
+      }
+
+      .workspace-doctor-summary {
+        margin-left: 8px;
+        color: var(--text);
+      }
+
+      .workspace-doctor-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .workspace-doctor-target,
+      .workspace-doctor-meta {
+        color: var(--muted);
+        font-size: 11px;
+      }
+
+      .workspace-doctor-meta {
+        padding: 6px 10px 0;
+      }
+
+      .workspace-doctor-checks {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 4px;
+        padding: 8px 10px 4px;
+      }
+
+      .workspace-doctor-check {
+        display: grid;
+        grid-template-columns: 28px minmax(0, 1fr);
+        gap: 4px;
+        min-height: 58px;
+        padding: 6px;
+        border: 1px solid #e5eaee;
+        background: #fff;
+      }
+
+      .workspace-doctor-state {
+        color: var(--brand-strong);
+        font-weight: 700;
+        grid-row: span 2;
+        text-align: center;
+      }
+
+      .workspace-doctor-label {
+        overflow: hidden;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .workspace-doctor-message {
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .workspace-doctor-check.warn,
+      .workspace-doctor-project.attention {
+        border-color: #ead08a;
+        background: var(--warn-soft);
+      }
+
+      .workspace-doctor-check.fail,
+      .workspace-doctor-project.blocked {
+        border-color: #e0a0a0;
+        background: var(--fail-soft);
+      }
+
+      .workspace-doctor-check.pass,
+      .workspace-doctor-project.ready {
+        border-color: #aed8c1;
+        background: var(--ready-soft);
+      }
+
+      .workspace-doctor-check.warn .workspace-doctor-state {
+        color: var(--warn);
+      }
+
+      .workspace-doctor-check.fail .workspace-doctor-state {
+        color: var(--fail);
+      }
+
+      .workspace-doctor-projects {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px 10px 10px;
+      }
+
+      .workspace-doctor-project {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 8px;
+        align-items: center;
+        min-height: 42px;
+        border: 1px solid #e5eaee;
+        background: #fff;
+        color: var(--text);
+        padding: 6px 8px;
+        text-align: left;
+      }
+
+      .workspace-doctor-project:hover {
+        border-color: #7aa9d4;
+      }
+
+      .workspace-doctor-project-name {
+        overflow: hidden;
+        font-weight: 600;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .workspace-doctor-project-status {
+        color: var(--brand-strong);
+        font-size: 11px;
+        font-weight: 700;
+      }
+
+      .workspace-doctor-project-summary {
+        grid-column: span 2;
+        overflow: hidden;
+        color: var(--muted);
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
       .doctor {
         margin: 8px 10px 0;
         border: 1px solid var(--line);
@@ -714,6 +873,18 @@
         border-color: var(--ready);
         background: var(--ready-soft);
         color: #135b37;
+      }
+
+      .badge.attention {
+        border-color: var(--warn);
+        background: var(--warn-soft);
+        color: #674600;
+      }
+
+      .badge.blocked {
+        border-color: var(--fail);
+        background: var(--fail-soft);
+        color: #8d2020;
       }
 
       .badge.starting,
@@ -893,6 +1064,11 @@
           grid-template-columns: 1fr;
         }
 
+        .workspace-doctor-checks,
+        .workspace-doctor-projects {
+          grid-template-columns: 1fr;
+        }
+
         .preview-viewport {
           height: 220px;
         }
@@ -921,6 +1097,9 @@
         </button>
         <button class="btn primary" id="resumeWorkspaceBtn" disabled>
           <span class="btn-icon">▶</span>Resume Workspace
+        </button>
+        <button class="btn primary" id="startReadyWorkspaceBtn" disabled>
+          <span class="btn-icon">▶</span>Start Ready
         </button>
         <select class="workspace-select" id="workspaceSelect" aria-label="Workspace profile" hidden>
           <option value="">Last running workspace</option>
@@ -976,6 +1155,25 @@
           </div>
 
           <section class="detail" id="projectDetail" hidden>
+            <section class="workspace-doctor" id="workspaceDoctorPanel" hidden>
+              <div class="workspace-doctor-header">
+                <div>
+                  <span class="workspace-doctor-title">Workspace Doctor</span>
+                  <span class="badge" id="workspaceDoctorBadge">Empty</span>
+                  <span class="workspace-doctor-summary" id="workspaceDoctorSummary"></span>
+                </div>
+                <div class="workspace-doctor-actions">
+                  <span class="workspace-doctor-target" id="workspaceDoctorTarget"></span>
+                  <button class="btn" id="refreshWorkspaceDoctorBtn">
+                    <span class="btn-icon">↻</span>Check Workspace
+                  </button>
+                </div>
+              </div>
+              <div class="workspace-doctor-meta" id="workspaceDoctorTotals"></div>
+              <div class="workspace-doctor-checks" id="workspaceDoctorChecks"></div>
+              <div class="workspace-doctor-projects" id="workspaceDoctorProjects"></div>
+            </section>
+
             <div class="setup" id="setupPanel">
               <div class="section-header">
                 <div>

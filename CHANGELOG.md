@@ -5,6 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Workspace Doctor checks the selected workspace/profile for first-green-run
+  blockers and warnings across directories, commands, dependency folders,
+  `.env.example` gaps, duplicate or busy ports, and local URLs.
+- **Start Ready** starts only Workspace Doctor projects without blocking
+  failures, skipping blocked services instead of forcing a full-stack start.
+
 ## [3.2.0] - 2026-06-22
 
 ### Added

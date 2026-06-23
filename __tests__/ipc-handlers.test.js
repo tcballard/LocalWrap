@@ -267,6 +267,58 @@ describe('createIpcHandlers', () => {
     );
   });
 
+  test('workspace:diagnose summarizes the selected workspace profile', async () => {
+    const { invoke } = createHandlers();
+    const project = await createSavedProject(invoke);
+    const { profile } = await invoke('workspace:saveProfile', {
+      name: 'Saved stack',
+      projectIds: [project.id],
+    });
+
+    const diagnosis = await invoke('workspace:diagnose', profile.id);
+
+    expect(diagnosis).toMatchObject({
+      status: 'ready',
+      target: {
+        kind: 'profile',
+        profileId: profile.id,
+        name: 'Saved stack',
+      },
+      totals: {
+        projects: 1,
+        ready: 1,
+      },
+      startableProjectIds: [project.id],
+    });
+  });
+
+  test('workspace:startReady starts only projects without Workspace Doctor blockers', async () => {
+    const { invoke } = createHandlers();
+    const ready = await createSavedProject(invoke, { name: 'Ready App' });
+    const blockedDir = path.join(fixture.root, 'blocked-app');
+    fs.mkdirSync(blockedDir);
+    const blocked = await createSavedProject(invoke, {
+      name: 'Blocked App',
+      cwd: blockedDir,
+      port: 5174,
+      url: 'http://localhost:5174',
+    });
+    fs.rmSync(blockedDir, { recursive: true, force: true });
+    const { profile } = await invoke('workspace:saveProfile', {
+      name: 'Mixed stack',
+      projectIds: [ready.id, blocked.id],
+    });
+
+    const result = await invoke('workspace:startReady', profile.id);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]).toMatchObject({ projectId: ready.id, status: 'started' });
+    expect(result.skippedBlockedProjectIds).toEqual([blocked.id]);
+    expect(fixture.projectLifecycle.getState(ready.id).status).toBe('ready');
+    expect(fixture.projectLifecycle.getState(blocked.id).status).toBe('stopped');
+  });
+
   test('workspace pack inspect and import save a repo-defined stack', async () => {
     fs.mkdirSync(path.join(fixture.root, '.localwrap'));
     fs.writeFileSync(

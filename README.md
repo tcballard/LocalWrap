@@ -21,6 +21,9 @@ same working set without terminal juggling.
   profile directly when you switch context.
 - **Team workspace packs** — import or export a repo-owned
   `.localwrap/workspace.json` so a project can describe the local stack it needs.
+- **Workspace Doctor** — check the selected stack for missing folders,
+  dependency installs, env gaps, duplicate/busy ports, unsafe commands, and bad
+  URLs before the first green run.
 - **Guided project import** — pick a repo and LocalWrap suggests the name,
   command, port, and URL from common package scripts.
 - **Process control** — start/stop/restart dev commands with `PORT` injected and
@@ -121,6 +124,16 @@ profiles, but does not start commands automatically.
 Project paths are relative to the selected repo folder and must stay inside it.
 Commands still pass through LocalWrap's command allowlist and local URL
 validation before they are saved.
+
+## First Green Run
+
+Workspace Doctor checks the selected workspace profile, last running set, or all
+saved projects when no smaller set is selected. Projects with blocking failures
+stay out of **Start Ready**, while projects with warnings remain startable so a
+developer can bring up the parts of the stack that are already safe to run.
+
+Current workspace checks cover directories, commands, Node dependency folders,
+`.env.example` gaps, duplicate or busy ports, and local URL validity.
 
 ## Build distributables
 
