@@ -37,6 +37,20 @@ The Release product is the universal `LocalWrap.app`, bundle ID
 copies compatible data from the former Electron LocalWrap store without editing
 the source file.
 
+## Install with Homebrew
+
+Signed releases are published through the `tcballard/homebrew-tap` Cask:
+
+```bash
+brew tap tcballard/tap
+brew install --cask localwrap
+```
+
+After notarization succeeds, the release workflow publishes the GitHub Release
+and updates the Cask with the exact DMG version and SHA-256. The repository
+secret `HOMEBREW_TAP_TOKEN` must have Contents read/write access to
+`tcballard/homebrew-tap`.
+
 ## Signed distribution
 
 `./script/release_native_macos.sh` archives, Developer ID-signs, packages,

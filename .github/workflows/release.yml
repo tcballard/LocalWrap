@@ -36,3 +36,33 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${GITHUB_REF_NAME}" .build/LocalWrapMac-Signed/*.dmg .build/LocalWrapMac-Signed/*.sha256 --clobber
+      - name: Check out Homebrew tap
+        uses: actions/checkout@v6
+        with:
+          repository: tcballard/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+      - name: Update Homebrew Cask
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${VERSION#v}"
+          SHA256="$(cat ".build/LocalWrapMac-Signed/LocalWrap-${VERSION}-universal.dmg.sha256")"
+          ./script/render_homebrew_cask.sh homebrew-tap/Casks/localwrap.rb "$VERSION" "$SHA256"
+          ruby -c homebrew-tap/Casks/localwrap.rb
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
+      - name: Publish Homebrew Cask
+        working-directory: homebrew-tap
+        run: |
+          if git diff --quiet -- Casks/localwrap.rb; then
+            echo "Cask is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/localwrap.rb
+          git commit -m "Update LocalWrap to ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:main
