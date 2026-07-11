@@ -1,0 +1,19 @@
+name: Native macOS CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate --spec project.yml --project .
+      - name: Test native app
+        run: xcodebuild -project LocalWrap.xcodeproj -scheme LocalWrapMac -destination 'platform=macOS' -derivedDataPath .build/LocalWrapMac test
+      - name: Verify universal ad-hoc Release
+        run: ./script/verify_native_macos_release.sh

@@ -1,0 +1,81 @@
+name: LocalWrap
+
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    macOS: '15.0'
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_HARDENED_RUNTIME: YES
+    ENABLE_APP_SANDBOX: NO
+    CODE_SIGN_STYLE: Automatic
+    MACOSX_DEPLOYMENT_TARGET: '15.0'
+    CLANG_ENABLE_MODULES: YES
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+
+targets:
+  LocalWrapMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
+      - path: assets/icon.icns
+        buildPhase: resources
+      - path: examples/sample-project
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_MODULE_NAME: LocalWrapMac
+        MARKETING_VERSION: 3.3.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Info.plist
+      configs:
+        Debug:
+          PRODUCT_NAME: LocalWrapMac
+          PRODUCT_BUNDLE_IDENTIFIER: com.localwrap.app.native
+        Release:
+          PRODUCT_NAME: LocalWrap
+          PRODUCT_BUNDLE_IDENTIFIER: com.localwrap.app
+          CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+          CODE_SIGN_ENTITLEMENTS: LocalWrap.entitlements
+    scheme:
+      testTargets:
+        - LocalWrapMacTests
+        - LocalWrapMacUITests
+      gatherCoverageData: true
+
+  LocalWrapMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests/Unit
+    dependencies:
+      - target: LocalWrapMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.localwrap.app.native.tests
+        GENERATE_INFOPLIST_FILE: YES
+        ENABLE_HARDENED_RUNTIME: NO
+
+  LocalWrapMacUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: Tests/UI
+    dependencies:
+      - target: LocalWrapMac
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.localwrap.app.native.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: LocalWrapMac
+        ENABLE_HARDENED_RUNTIME: NO

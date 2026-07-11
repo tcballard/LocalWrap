@@ -1,0 +1,38 @@
+name: Signed macOS Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    env:
+      LOCALWRAP_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Import Developer ID certificate
+        env:
+          CERTIFICATE_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_CI_KEYCHAIN_PASSWORD }}
+        run: ./script/import_apple_signing_certificate.sh
+      - name: Build, notarize, and verify
+        run: ./script/release_native_macos.sh
+      - name: Ensure draft release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release view "${GITHUB_REF_NAME}" || gh release create "${GITHUB_REF_NAME}" --draft --title "${GITHUB_REF_NAME}" --notes-file RELEASE_NOTES.md
+      - name: Upload signed DMG and checksum
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${GITHUB_REF_NAME}" .build/LocalWrapMac-Signed/*.dmg .build/LocalWrapMac-Signed/*.sha256 --clobber

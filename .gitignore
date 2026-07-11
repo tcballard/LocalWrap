@@ -1,0 +1,4 @@
+.build/
+LocalWrap.xcodeproj/
+*.xcresult
+.DS_Store
