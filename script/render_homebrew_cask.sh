@@ -18,7 +18,7 @@ cask "localwrap" do
 
   url "https://github.com/tcballard/LocalWrap/releases/download/v#{version}/LocalWrap-#{version}-universal.dmg"
   name "LocalWrap"
-  desc "Cockpit for localhost development projects"
+  desc "Unsigned pre-release cockpit for localhost development projects"
   homepage "https://github.com/tcballard/LocalWrap"
 
   depends_on macos: :sequoia

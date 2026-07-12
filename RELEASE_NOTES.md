@@ -1,19 +1,12 @@
-# LocalWrap 3.3.0
+# LocalWrap 0.1.1 — unsigned pre-release
 
-LocalWrap for macOS is now a native Swift 6 application. Windows and Linux
-remain Electron applications with their existing NSIS and AppImage installers.
+This is an **unsigned, unnotarized pre-release** of the standalone native macOS
+application. It is intended for early testing and is distributed through the
+`tcballard/tap` Homebrew tap.
 
-## macOS migration
+Because this build does not carry an Apple Developer ID signature or
+notarization ticket, macOS Gatekeeper will warn or block it on first launch.
+Only install it if you trust this repository and understand that limitation.
 
-On first native Release launch, LocalWrap validates and copies the Electron
-project document from `~/Library/Application Support/localwrap/projects.json`
-into `~/Library/Application Support/LocalWrapNative/store.json`. The Electron
-file is never edited or deleted. To return temporarily to Electron, quit the
-native app and launch the Electron build; it continues to read its original
-data. Changes made only in native LocalWrap are not copied back automatically.
-
-If native data is corrupt, LocalWrap preserves it and offers Restore Backup,
-confirmed Start Fresh, or Quit before any project or autostart command loads.
-
-The macOS download is a universal arm64/x86_64 Developer ID-signed, Apple-
-notarized DMG. Verify its adjacent `.sha256` file before opening it.
+The DMG contains a universal `arm64`/`x86_64` build and is accompanied by a
+SHA-256 checksum.

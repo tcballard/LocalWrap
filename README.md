@@ -39,17 +39,19 @@ the source file.
 
 ## Install with Homebrew
 
-Signed releases are published through the `tcballard/homebrew-tap` Cask:
+Unsigned pre-releases are published through the `tcballard/homebrew-tap` Cask:
 
 ```bash
 brew tap tcballard/tap
 brew install --cask localwrap
 ```
 
-After notarization succeeds, the release workflow publishes the GitHub Release
-and updates the Cask with the exact DMG version and SHA-256. The repository
-secret `HOMEBREW_TAP_TOKEN` must have Contents read/write access to
-`tcballard/homebrew-tap`.
+The release workflow marks the GitHub Release as a pre-release and updates the
+Cask with the exact DMG version and SHA-256. The repository secret
+`HOMEBREW_TAP_TOKEN` must have Contents read/write access to
+`tcballard/homebrew-tap`. These builds are ad-hoc signed only: they are not
+Developer ID signed or Apple-notarized, so Gatekeeper will warn or block them
+on first launch.
 
 ## Signed distribution
 
