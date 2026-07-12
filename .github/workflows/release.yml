@@ -49,7 +49,7 @@ jobs:
       - name: Publish Homebrew Cask
         working-directory: homebrew-tap
         run: |
-          if git diff --quiet -- Casks/localwrap.rb; then
+          if [[ -z "$(git status --porcelain -- Casks/localwrap.rb)" ]]; then
             echo "Cask is already current."
             exit 0
           fi
