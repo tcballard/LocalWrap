@@ -23,6 +23,21 @@ source in a review sheet. Folder selection never saves or runs anything:
 **Add & Start** is the explicit execution action. Ambiguous or unsupported
 repositories stay editable and require a command before they can be added.
 
+## Repository manifest
+
+Teams can commit `.localwrap/workspace.json` to describe a repository's local
+projects, commands, ports, dependencies, health checks, and saved workspace
+groupings. `localwrap.json` at the repository root is also recognised, with the
+`.localwrap` file taking precedence. Opening the repository shows an add/update
+review first; it never imports or runs the manifest automatically.
+
+Manifest paths must remain inside the selected repository, commands use
+LocalWrap's safe executable allowlist, and URLs remain loopback-only. The v1
+contract deliberately excludes environment values, secrets, headers, cookies,
+credentials, and tokens. See the
+[workspace manifest v1 guide](Documentation/workspace-manifest-v1.md) and its
+[JSON Schema](Documentation/schema/workspace-manifest-v1.schema.json).
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements

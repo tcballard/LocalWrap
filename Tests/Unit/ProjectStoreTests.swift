@@ -247,6 +247,169 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(try store.workspace().savedWorkspaces[0].source, profileSource)
     }
 
+    func testWorkspacePackReimportAdvancesOnlyChangedTimestamps() throws {
+        let createdAt = "2026-07-10T05:00:00.000Z"
+        let startedAt = "2026-07-10T06:00:00.000Z"
+        let unchangedAt = "2026-07-10T07:00:00.000Z"
+        let changedAt = "2026-07-10T08:00:00.000Z"
+        var currentTimestamp = createdAt
+        var generatedIDs = ["saved-workspace"].makeIterator()
+        let store = ProjectStore(
+            paths: paths,
+            now: { currentTimestamp },
+            makeID: { generatedIDs.next() ?? "unexpected-id" }
+        )
+        let originalPack = workspacePack(command: "npm start", profileName: "Default")
+
+        let first = try store.importWorkspacePack(originalPack)
+        let firstProject = try XCTUnwrap(first.projects.first)
+        let firstProfile = try XCTUnwrap(first.workspace.savedWorkspaces.first)
+        currentTimestamp = startedAt
+        _ = try store.markWorkspaceStarted(id: firstProfile.id)
+        let started = try store.load()
+        let startedProfile = try XCTUnwrap(started.workspace.savedWorkspaces.first)
+        let dataBeforeUnchangedImport = try Data(contentsOf: paths.store)
+
+        currentTimestamp = unchangedAt
+        let unchanged = try store.importWorkspacePack(originalPack)
+
+        XCTAssertEqual(unchanged.projects.count, 1)
+        XCTAssertEqual(unchanged.projects[0].id, firstProject.id)
+        XCTAssertEqual(unchanged.projects[0].createdAt, createdAt)
+        XCTAssertEqual(unchanged.projects[0].updatedAt, createdAt)
+        XCTAssertEqual(unchanged.projects[0].source, firstProject.source)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces.count, 1)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces[0].id, firstProfile.id)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces[0].createdAt, createdAt)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces[0].updatedAt, startedAt)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces[0].lastStartedAt, startedAt)
+        XCTAssertEqual(unchanged.workspace.savedWorkspaces[0].source, firstProfile.source)
+        XCTAssertEqual(unchanged.workspace.updatedAt, startedAt)
+        XCTAssertEqual(try Data(contentsOf: paths.store), dataBeforeUnchangedImport)
+
+        currentTimestamp = changedAt
+        let changed = try store.importWorkspacePack(
+            workspacePack(command: "npm run dev", profileName: "Development")
+        )
+
+        XCTAssertEqual(changed.projects.count, 1)
+        XCTAssertEqual(changed.projects[0].id, firstProject.id)
+        XCTAssertEqual(changed.projects[0].createdAt, createdAt)
+        XCTAssertEqual(changed.projects[0].updatedAt, changedAt)
+        XCTAssertEqual(changed.projects[0].command, "npm run dev")
+        XCTAssertEqual(changed.projects[0].source, firstProject.source)
+        XCTAssertEqual(changed.workspace.savedWorkspaces.count, 1)
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].id, firstProfile.id)
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].createdAt, createdAt)
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].updatedAt, changedAt)
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].lastStartedAt, startedAt)
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].name, "Development")
+        XCTAssertEqual(changed.workspace.savedWorkspaces[0].source, firstProfile.source)
+        XCTAssertEqual(changed.workspace.updatedAt, changedAt)
+        XCTAssertEqual(startedProfile.lastStartedAt, changed.workspace.savedWorkspaces[0].lastStartedAt)
+    }
+
+    func testWorkspacePackImportReservesAllLocalIDsBeforeRemappingDependencies() throws {
+        let store = makeStore()
+        let unrelated = try store.createProject(draft(name: "Unrelated", id: "api"))
+        let apiDraft = draft(name: "API", id: "api")
+        let webDraft = draft(name: "Web", id: "web", dependsOn: ["api"])
+        let pack = ReviewedWorkspacePack(
+            name: "Stack",
+            rootURL: root,
+            packURL: root.appendingPathComponent("localwrap.json"),
+            projects: [
+                ReviewedWorkspacePackProject(id: "api", name: "API", path: "API", draft: apiDraft),
+                ReviewedWorkspacePackProject(id: "web", name: "Web", path: "Web", draft: webDraft),
+            ],
+            profiles: [
+                ReviewedWorkspacePackProfile(
+                    id: "default",
+                    name: "Full Stack",
+                    projectIDs: ["api", "web"]
+                ),
+            ]
+        )
+
+        let first = try store.importWorkspacePack(pack)
+        let importedAPI = try XCTUnwrap(first.projects.first { $0.source?.packProjectId == "api" })
+        let importedWeb = try XCTUnwrap(first.projects.first { $0.source?.packProjectId == "web" })
+
+        XCTAssertEqual(unrelated.id, "api")
+        XCTAssertEqual(importedAPI.id, "api-2")
+        XCTAssertEqual(importedWeb.dependsOn, ["api-2"])
+        XCTAssertEqual(first.workspace.savedWorkspaces[0].projectIds, ["api-2", "web"])
+
+        let second = try store.importWorkspacePack(pack)
+        XCTAssertEqual(second.projects.count, 3)
+        XCTAssertEqual(second.workspace.savedWorkspaces.count, 1)
+        XCTAssertEqual(
+            second.projects.first { $0.source?.packProjectId == "web" }?.dependsOn,
+            ["api-2"]
+        )
+    }
+
+    func testWorkspacePackImportMatchesUniqueCanonicalFolderWhenCommandChanged() throws {
+        let store = makeStore()
+        let saved = try store.createProject(draft(name: "Web", id: "saved-web"))
+        var changedDraft = draft(name: "Web", id: "web", command: "npm run dev")
+        changedDraft.cwd = saved.cwd
+        let pack = ReviewedWorkspacePack(
+            name: "Stack",
+            rootURL: root,
+            packURL: root.appendingPathComponent("localwrap.json"),
+            projects: [
+                ReviewedWorkspacePackProject(
+                    id: "web",
+                    name: "Web",
+                    path: "Web",
+                    draft: changedDraft
+                ),
+            ],
+            profiles: []
+        )
+
+        let imported = try store.importWorkspacePack(pack)
+
+        XCTAssertEqual(imported.projects.count, 1)
+        XCTAssertEqual(imported.projects[0].id, saved.id)
+        XCTAssertEqual(imported.projects[0].command, "npm run dev")
+        XCTAssertEqual(imported.projects[0].source?.packProjectId, "web")
+    }
+
+    func testWorkspacePackImportRejectsAmbiguousSavedFolderWithoutWriting() throws {
+        let store = makeStore()
+        let first = try store.createProject(draft(name: "Shared", id: "first"))
+        var secondDraft = draft(name: "Second", id: "second", command: "npm run dev")
+        secondDraft.cwd = first.cwd
+        _ = try store.createProject(secondDraft)
+        let original = try Data(contentsOf: paths.store)
+        var importedDraft = draft(name: "Imported", id: "manifest")
+        importedDraft.cwd = first.cwd
+        let pack = ReviewedWorkspacePack(
+            name: "Stack",
+            rootURL: root,
+            packURL: root.appendingPathComponent("localwrap.json"),
+            projects: [
+                ReviewedWorkspacePackProject(
+                    id: "manifest",
+                    name: "Imported",
+                    path: "Shared",
+                    draft: importedDraft
+                ),
+            ],
+            profiles: []
+        )
+
+        XCTAssertThrowsError(try store.importWorkspacePack(pack)) { error in
+            guard let persistenceError = error as? PersistenceError,
+                  case .workspacePackConflict = persistenceError else {
+                return XCTFail("Expected an ambiguous workspace-pack mapping error.")
+            }
+        }
+        XCTAssertEqual(try Data(contentsOf: paths.store), original)
+    }
+
     func testQuitRecoveryDoesNotTouchCorruptStore() throws {
         try FileManager.default.createDirectory(at: paths.directory, withIntermediateDirectories: true)
         let corrupt = Data("bad".utf8)
@@ -300,6 +463,34 @@ final class ProjectStoreTests: XCTestCase {
             url: "http://localhost:3000",
             dependsOn: dependsOn,
             source: source
+        )
+    }
+
+    private func workspacePack(
+        command: String,
+        profileName: String
+    ) -> ReviewedWorkspacePack {
+        let packURL = root.appendingPathComponent("localwrap.json")
+        let projectDraft = draft(name: "Web", id: "web", command: command)
+        return ReviewedWorkspacePack(
+            name: "Example",
+            rootURL: root,
+            packURL: packURL,
+            projects: [
+                ReviewedWorkspacePackProject(
+                    id: "web",
+                    name: "Web",
+                    path: "Web",
+                    draft: projectDraft
+                ),
+            ],
+            profiles: [
+                ReviewedWorkspacePackProfile(
+                    id: "default",
+                    name: profileName,
+                    projectIDs: ["web"]
+                ),
+            ]
         )
     }
 

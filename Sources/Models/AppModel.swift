@@ -18,7 +18,12 @@ final class AppModel {
     var releaseNotice: ReleaseNotice?
     var selectedWorkspaceTarget: WorkspaceTarget?
     var errorMessage: String?
-    private(set) var repositoryProposal: RepositoryProposal?
+    private(set) var repositoryOpenProposal: RepositoryOpenProposal?
+
+    var repositoryProposal: RepositoryProposal? {
+        guard case .project(let proposal) = repositoryOpenProposal else { return nil }
+        return proposal
+    }
 
     private let store: ProjectStore?
     private let runtimeService: RuntimeService
@@ -63,8 +68,9 @@ final class AppModel {
                 .appendingPathComponent("LocalWrap Sample Project", isDirectory: true)
         },
         directoryPicker: DirectoryPickerService = .live,
-        repositoryOnboarding: RepositoryOnboardingService = RepositoryOnboardingService(),
-        repositoryProposal: RepositoryProposal? = nil
+        repositoryOnboarding: RepositoryOnboardingService? = nil,
+        repositoryProposal: RepositoryProposal? = nil,
+        repositoryOpenProposal: RepositoryOpenProposal? = nil
     ) {
         self.projects = projects
         self.workspace = workspace
@@ -98,7 +104,9 @@ final class AppModel {
         self.sampleDestination = sampleDestination
         self.directoryPicker = directoryPicker
         self.repositoryOnboarding = repositoryOnboarding
-        self.repositoryProposal = repositoryProposal
+            ?? RepositoryOnboardingService(workspacePacks: workspacePacks)
+        self.repositoryOpenProposal = repositoryOpenProposal
+            ?? repositoryProposal.map(RepositoryOpenProposal.project)
         openedReadyRunIDs = []
     }
 
@@ -159,6 +167,77 @@ final class AppModel {
 
     static func forCurrentLaunch() -> AppModel {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-workspace-manifest-review") {
+            let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
+            let packURL = root.appendingPathComponent(".localwrap/workspace.json")
+            let draft = ProjectDraft(
+                id: "web",
+                name: "Web",
+                cwd: "/tmp/apps/web",
+                command: "npm run dev",
+                port: 5_173,
+                url: "http://localhost:5173",
+                dependsOn: ["api"],
+                healthCheck: HealthCheck(path: "/health")
+            )
+            let pack = ReviewedWorkspacePack(
+                name: "Fixture Stack",
+                rootURL: root,
+                packURL: packURL,
+                projects: [
+                    ReviewedWorkspacePackProject(
+                        id: "web",
+                        name: "Web",
+                        path: "apps/web",
+                        draft: draft
+                    ),
+                ],
+                profiles: [
+                    ReviewedWorkspacePackProfile(
+                        id: "default",
+                        name: "Full Stack",
+                        projectIDs: ["web"]
+                    ),
+                ]
+            )
+            let review = WorkspacePackReview(
+                name: "Fixture Stack",
+                rootURL: root,
+                packURL: packURL,
+                version: 1,
+                projects: [
+                    WorkspacePackReviewProject(
+                        id: "web",
+                        name: "Web",
+                        path: "apps/web",
+                        command: "npm run dev",
+                        port: 5_173,
+                        url: "http://localhost:5173",
+                        dependsOn: ["api"],
+                        healthCheck: HealthCheck(path: "/health")
+                    ),
+                ],
+                profiles: [
+                    WorkspacePackReviewProfile(
+                        id: "default",
+                        name: "Full Stack",
+                        projectIDs: ["web"]
+                    ),
+                ],
+                issues: [],
+                changes: [
+                    WorkspacePackChange(
+                        entity: .project,
+                        entityID: "web",
+                        name: "Web",
+                        disposition: .add,
+                        existingSavedID: nil
+                    ),
+                ],
+                pack: pack
+            )
+            return AppModel(repositoryOpenProposal: .workspace(review))
+        }
         if ProcessInfo.processInfo.arguments.contains("--ui-test-repository-review") {
             let draft = ProjectDraft(
                 name: "Review Fixture",
@@ -228,8 +307,16 @@ final class AppModel {
 
     func chooseRepository() {
         guard let directory = directoryPicker.choose() else { return }
+        reviewRepository(at: directory)
+    }
+
+    func reviewRepository(at directory: URL) {
         do {
-            repositoryProposal = try repositoryOnboarding.propose(directory: directory)
+            repositoryOpenProposal = try repositoryOnboarding.openProposal(
+                directory: directory,
+                projects: projects,
+                workspace: workspace
+            )
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -237,7 +324,7 @@ final class AppModel {
     }
 
     func dismissRepositoryProposal() {
-        repositoryProposal = nil
+        repositoryOpenProposal = nil
     }
 
     func runtime(for projectID: String) -> RuntimeSnapshot {
@@ -571,6 +658,46 @@ final class AppModel {
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func importWorkspacePack(_ review: WorkspacePackReview) -> Bool {
+        guard review.canImport, review.pack != nil else {
+            errorMessage = review.blockers.first?.message
+                ?? "Workspace pack is not ready to import."
+            return false
+        }
+        guard let store else { return false }
+        do {
+            let activeUpdates = review.changes.compactMap { change -> Project? in
+                guard change.entity == .project,
+                      change.disposition == .update,
+                      let projectID = change.existingSavedID,
+                      runtime(for: projectID).status.isActive else { return nil }
+                return project(id: projectID)
+            }
+            guard activeUpdates.isEmpty else {
+                let names = activeUpdates.map(\.name).sorted().joined(separator: ", ")
+                throw WorkspaceError.pack(
+                    "Stop these projects before importing running configuration changes: \(names)."
+                )
+            }
+            _ = try workspacePacks.importReviewed(review, into: store)
+            try reloadPersistence()
+            selectedWorkspaceTarget = .allProjects
+            workspaceDiagnosis = try workspaceDoctor.diagnose(
+                projects: projects,
+                workspace: workspace,
+                target: selectedWorkspaceTarget,
+                runtimes: runtimes
+            )
+            repositoryOpenProposal = nil
+            errorMessage = nil
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
         }
     }
 

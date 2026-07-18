@@ -79,9 +79,18 @@ struct ContentView: View {
                 )
             }
         }
-        .sheet(item: repositoryProposalBinding) { proposal in
-            RepositoryReviewView(proposal: proposal) { project in
-                selection = .project(project.id)
+        .sheet(item: repositoryOpenProposalBinding) { proposal in
+            switch proposal {
+            case .project(let projectProposal):
+                RepositoryReviewView(proposal: projectProposal) { project in
+                    selection = .project(project.id)
+                }
+            case .workspace(let review):
+                WorkspacePackReviewView(review: review) {
+                    if appModel.importWorkspacePack(review) {
+                        selection = .workspaces
+                    }
+                }
             }
         }
     }
@@ -115,9 +124,9 @@ struct ContentView: View {
         )
     }
 
-    private var repositoryProposalBinding: Binding<RepositoryProposal?> {
+    private var repositoryOpenProposalBinding: Binding<RepositoryOpenProposal?> {
         Binding(
-            get: { appModel.repositoryProposal },
+            get: { appModel.repositoryOpenProposal },
             set: { if $0 == nil { appModel.dismissRepositoryProposal() } }
         )
     }

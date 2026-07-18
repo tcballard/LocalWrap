@@ -26,7 +26,7 @@ final class WorkspacePackServiceTests: XCTestCase {
             at: packURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let json = #"{"localwrap":1,"name":"Acme","projects":[{"id":"Web App","path":"apps/web","command":"npm run dev","port":"5173","dependsOn":["API Service"],"healthCheck":{"path":"/health"}},{"id":"API Service","path":"services/api","command":"node server.js","port":4000}],"workspaces":[{"name":"Full Stack","projects":["API Service","Web App"]}]}"#
+        let json = #"{"localwrap":1,"name":"Acme","projects":[{"id":"Web App","path":"apps/web","command":"npm run dev","port":5173,"dependsOn":["API Service"],"healthCheck":{"path":"/health"}},{"id":"API Service","path":"services/api","command":"node server.js","port":4000}],"workspaces":[{"name":"Full Stack","projects":["API Service","Web App"]}]}"#
         try Data(json.utf8).write(to: packURL)
         let service = WorkspacePackService()
 
@@ -63,8 +63,11 @@ final class WorkspacePackServiceTests: XCTestCase {
         )
         _ = try service.writeExport(exported, rootURL: root, overwrite: true)
         let reread = try service.review(rootURL: root)
-        XCTAssertEqual(reread.projects.map(\.id), reviewed.projects.map(\.id))
-        XCTAssertEqual(reread.projects[0].draft.dependsOn, ["api-service"])
+        XCTAssertEqual(reread.projects.map(\.id).sorted(), reviewed.projects.map(\.id).sorted())
+        XCTAssertEqual(
+            reread.projects.first(where: { $0.id == "web-app" })?.draft.dependsOn,
+            ["api-service"]
+        )
     }
 
     func testRejectsAbsoluteEscapingSymlinkUnknownDependencyAndUnsafeCommand() throws {
@@ -126,6 +129,299 @@ final class WorkspacePackServiceTests: XCTestCase {
         XCTAssertEqual(second.projects[0].source?.packProjectId, "web")
         XCTAssertEqual(second.workspace.savedWorkspaces.count, 1)
         XCTAssertEqual(second.workspace.savedWorkspaces[0].lastStartedAt, "2026-07-10T20:00:00Z")
+    }
+
+    func testDiscoveryPrefersCanonicalNestedManifest() throws {
+        let nested = root.appendingPathComponent(".localwrap/workspace.json")
+        let rootManifest = root.appendingPathComponent("localwrap.json")
+        try FileManager.default.createDirectory(at: nested.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let payload = Data(#"{"localwrap":1,"projects":[{"id":"web","path":"apps/web","command":"npm start"}]}"#.utf8)
+        try payload.write(to: nested)
+        try payload.write(to: rootManifest)
+
+        XCTAssertEqual(try WorkspacePackService().discover(in: root), nested)
+    }
+
+    func testInspectionRejectsMalformedAndNonObjectJSON() throws {
+        let service = WorkspacePackService()
+        let packURL = root.appendingPathComponent("localwrap.json")
+
+        for raw in ["{not-json", "[]"] {
+            try Data(raw.utf8).write(to: packURL)
+
+            let review = try service.inspect(rootURL: root)
+
+            XCTAssertNil(review.pack)
+            XCTAssertFalse(review.canImport)
+            XCTAssertEqual(review.blockers.map(\.code), ["manifest-invalid"])
+        }
+    }
+
+    func testInspectionRequiresExplicitIntegerVersionOne() throws {
+        let service = WorkspacePackService()
+        let packURL = root.appendingPathComponent("localwrap.json")
+        let invalidVersions = [
+            #"{"projects":[{"id":"web","path":"apps/web","command":"npm start"}]}"#,
+            #"{"version":1,"projects":[{"id":"web","path":"apps/web","command":"npm start"}]}"#,
+            #"{"localwrap":"1","projects":[{"id":"web","path":"apps/web","command":"npm start"}]}"#,
+        ]
+
+        for raw in invalidVersions {
+            try Data(raw.utf8).write(to: packURL)
+
+            let review = try service.inspect(rootURL: root)
+
+            XCTAssertNil(review.pack)
+            XCTAssertFalse(review.canImport)
+            XCTAssertEqual(review.blockers.map(\.code), ["manifest-invalid"])
+        }
+
+        try Data(#"{"localwrap":2,"projects":[{"id":"web","path":"apps/web","command":"npm start"}]}"#.utf8)
+            .write(to: packURL)
+        let unsupported = try service.inspect(rootURL: root)
+        XCTAssertNil(unsupported.pack)
+        XCTAssertFalse(unsupported.canImport)
+        XCTAssertTrue(unsupported.blockers.contains { $0.code == "unsupported-version" })
+    }
+
+    func testInspectionRejectsNonIntegerPortsInsteadOfDefaultingThem() throws {
+        let service = WorkspacePackService()
+        let packURL = root.appendingPathComponent("localwrap.json")
+        let invalidPorts = [#""5173""#, #""not-a-port""#, "true"]
+
+        for port in invalidPorts {
+            let raw = #"{"localwrap":1,"projects":[{"id":"web","path":"apps/web","command":"npm start","port":\#(port)}]}"#
+            try Data(raw.utf8).write(to: packURL)
+
+            let review = try service.inspect(rootURL: root)
+
+            XCTAssertNil(review.pack)
+            XCTAssertFalse(review.canImport)
+            XCTAssertEqual(review.blockers.map(\.code), ["manifest-invalid"])
+        }
+    }
+
+    func testInspectionCollectsScopedBlockersWithoutProducingImportPayload() throws {
+        let payload: [String: Any] = [
+            "localwrap": 1,
+            "environment": ["TOKEN": "must-not-be-read"],
+            "projects": [
+                [
+                    "id": "web",
+                    "path": "apps/web",
+                    "command": "bash unsafe.sh",
+                    "port": 3_000,
+                    "dependsOn": ["api"],
+                ],
+                [
+                    "id": "api",
+                    "path": "../outside",
+                    "command": "npm start",
+                    "port": 3_000,
+                    "url": "https://example.com:3000",
+                    "dependsOn": ["web"],
+                ],
+            ],
+            "workspaces": [["id": "stack", "projects": ["missing"]]],
+        ]
+        let packURL = root.appendingPathComponent("localwrap.json")
+        try JSONSerialization.data(withJSONObject: payload).write(to: packURL)
+
+        let review = try WorkspacePackService().inspect(rootURL: root)
+        let codes = Set(review.blockers.map(\.code))
+
+        XCTAssertNil(review.pack)
+        XCTAssertFalse(review.canImport)
+        XCTAssertEqual(review.projects.count, 2)
+        XCTAssertTrue(codes.isSuperset(of: [
+            "sensitive-field-unsupported",
+            "command-invalid",
+            "project-path-escape",
+            "url-invalid",
+            "port-conflict",
+            "dependency-cycle",
+            "workspace-project-unknown",
+        ]))
+        XCTAssertThrowsError(try WorkspacePackService().review(rootURL: root))
+    }
+
+    func testInspectionPlansAddUpdateAndUnchangedUsingImportIdentity() throws {
+        let packURL = root.appendingPathComponent("localwrap.json")
+        try Data(#"{"localwrap":1,"name":"Stack","projects":[{"id":"web","path":"apps/web","name":"Web","command":"npm start","port":3000},{"id":"api","path":"services/api","name":"API","command":"node server.js","port":4000},{"id":"worker","path":".","name":"Worker","command":"npm run worker","port":5000}],"workspaces":[{"id":"default","name":"Default","projects":["web","api"]}]}"#.utf8)
+            .write(to: packURL)
+        let source: (String) -> ProjectSource = { id in
+            ProjectSource(type: "workspace-pack", packPath: packURL.path, packProjectId: id)
+        }
+        let savedWeb = Project(
+            id: "saved-web",
+            name: "Web",
+            cwd: web.path,
+            command: "npm start",
+            port: 3_000,
+            url: "http://localhost:3000",
+            autostart: false,
+            openOnReady: true,
+            createdAt: "2026-07-10T20:00:00Z",
+            updatedAt: "2026-07-10T20:00:00Z",
+            source: source("web")
+        )
+        let savedAPI = Project(
+            id: "saved-api",
+            name: "Old API",
+            cwd: api.path,
+            command: "node server.js",
+            port: 4_000,
+            url: "http://localhost:4000",
+            autostart: false,
+            openOnReady: true,
+            createdAt: "2026-07-10T20:00:00Z",
+            updatedAt: "2026-07-10T20:00:00Z",
+            source: source("api")
+        )
+
+        let review = try WorkspacePackService().inspect(
+            rootURL: root,
+            projects: [savedWeb, savedAPI],
+            workspace: .empty
+        )
+        let projectChanges = Dictionary(uniqueKeysWithValues: review.changes
+            .filter { $0.entity == .project }
+            .map { ($0.entityID, $0.disposition) })
+
+        XCTAssertEqual(projectChanges["web"], .unchanged)
+        XCTAssertEqual(projectChanges["api"], .update)
+        XCTAssertEqual(projectChanges["worker"], .add)
+        XCTAssertTrue(review.canImport)
+    }
+
+    func testReviewedManifestMustBeReviewedAgainAfterRelevantSavedStateChanges() throws {
+        let packURL = root.appendingPathComponent("localwrap.json")
+        try Data(#"{"localwrap":1,"projects":[{"id":"web","path":"apps/web","command":"npm start","port":3000}]}"#.utf8)
+            .write(to: packURL)
+        let service = WorkspacePackService()
+        let review = try service.inspect(rootURL: root)
+        let paths = ProjectStorePaths(
+            directory: root.appendingPathComponent("store", isDirectory: true),
+            store: root.appendingPathComponent("store/store.json"),
+            backup: root.appendingPathComponent("store/store.json.bak"),
+            electronStore: root.appendingPathComponent("electron.json")
+        )
+        let store = ProjectStore(
+            paths: paths,
+            now: { "2026-07-10T20:00:00Z" },
+            makeID: { "saved-web" }
+        )
+        _ = try store.createProject(ProjectDraft(
+            id: "saved-web",
+            name: "Existing Web",
+            cwd: web.path,
+            command: "npm start",
+            port: 3_000,
+            url: "http://localhost:3000"
+        ))
+
+        XCTAssertThrowsError(try service.importReviewed(review, into: store)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("changed after review"))
+        }
+        XCTAssertEqual(try store.listProjects().count, 1)
+        XCTAssertNil(try store.listProjects()[0].source)
+    }
+
+    func testInspectionBlocksAmbiguousSavedFolderMapping() throws {
+        let packURL = root.appendingPathComponent("localwrap.json")
+        try Data(#"{"localwrap":1,"projects":[{"id":"web","path":"apps/web","command":"npm start","port":3000}]}"#.utf8)
+            .write(to: packURL)
+        let timestamp = "2026-07-10T20:00:00Z"
+        let saved = ["first", "second"].map { id in
+            Project(
+                id: id,
+                name: id.capitalized,
+                cwd: web.path,
+                command: id == "first" ? "npm start" : "npm run dev",
+                port: 3_000,
+                url: "http://localhost:3000",
+                createdAt: timestamp,
+                updatedAt: timestamp
+            )
+        }
+
+        let review = try WorkspacePackService().inspect(
+            rootURL: root,
+            projects: saved,
+            workspace: .empty
+        )
+
+        XCTAssertFalse(review.canImport)
+        XCTAssertTrue(review.blockers.contains { $0.code == "saved-project-folder-ambiguous" })
+    }
+
+    func testEquivalentStateExportsByteIdenticallyAndRoundTrips() throws {
+        let createdAt = "2026-07-10T20:00:00Z"
+        let packURL = root.appendingPathComponent(".localwrap/workspace.json")
+        let webProject = Project(
+            id: "saved-web",
+            name: "Web",
+            cwd: web.path,
+            command: "npm run dev",
+            port: 5_173,
+            url: "http://localhost:5173",
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            dependsOn: ["saved-api"],
+            source: ProjectSource(type: "workspace-pack", packPath: packURL.path, packProjectId: "web")
+        )
+        let apiProject = Project(
+            id: "saved-api",
+            name: "API",
+            cwd: api.path,
+            command: "node server.js",
+            port: 4_000,
+            url: "http://localhost:4000",
+            createdAt: createdAt,
+            updatedAt: createdAt,
+            source: ProjectSource(type: "workspace-pack", packPath: packURL.path, packProjectId: "api")
+        )
+        let profiles = [
+            WorkspaceProfile(
+                id: "saved-profile",
+                name: "Full Stack",
+                projectIds: ["saved-web", "saved-api"],
+                createdAt: createdAt,
+                updatedAt: createdAt,
+                lastStartedAt: nil,
+                source: WorkspaceSource(
+                    type: "workspace-pack",
+                    packPath: packURL.path,
+                    packWorkspaceId: "default"
+                )
+            ),
+        ]
+        let workspace = WorkspaceState(lastRunningProjectIds: [], savedWorkspaces: profiles, updatedAt: createdAt)
+        let service = WorkspacePackService()
+
+        let first = try service.buildExport(
+            rootURL: root,
+            projects: [webProject, apiProject],
+            workspace: workspace,
+            name: "Stack"
+        )
+        let second = try service.buildExport(
+            rootURL: root,
+            projects: [apiProject, webProject],
+            workspace: WorkspaceState(
+                lastRunningProjectIds: [],
+                savedWorkspaces: profiles.reversed(),
+                updatedAt: createdAt
+            ),
+            name: "Stack"
+        )
+
+        XCTAssertEqual(try service.canonicalData(for: first.pack), try service.canonicalData(for: second.pack))
+        _ = try service.writeExport(first, rootURL: root, overwrite: false)
+        let reviewed = try service.review(rootURL: root)
+        XCTAssertEqual(reviewed.projects.map(\.id), ["api", "web"])
+        XCTAssertEqual(reviewed.projects.first(where: { $0.id == "web" })?.draft.dependsOn, ["api"])
+        XCTAssertEqual(try Data(contentsOf: packURL), try service.canonicalData(for: first.pack))
     }
 
     private func review(

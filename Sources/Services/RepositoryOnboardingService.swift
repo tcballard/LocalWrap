@@ -2,9 +2,31 @@ import Foundation
 
 final class RepositoryOnboardingService {
     private let inspector: ProjectInspectionService
+    private let workspacePacks: WorkspacePackService
 
-    init(inspector: ProjectInspectionService = ProjectInspectionService()) {
+    init(
+        inspector: ProjectInspectionService = ProjectInspectionService(),
+        workspacePacks: WorkspacePackService = WorkspacePackService()
+    ) {
         self.inspector = inspector
+        self.workspacePacks = workspacePacks
+    }
+
+    func openProposal(
+        directory: URL,
+        projects: [Project],
+        workspace: WorkspaceState
+    ) throws -> RepositoryOpenProposal {
+        let root = directory.standardizedFileURL.resolvingSymlinksInPath()
+        if let packURL = try workspacePacks.discover(in: root) {
+            return .workspace(try workspacePacks.inspect(
+                rootURL: root,
+                packURL: packURL,
+                projects: projects,
+                workspace: workspace
+            ))
+        }
+        return .project(try propose(directory: root))
     }
 
     func propose(directory: URL) throws -> RepositoryProposal {

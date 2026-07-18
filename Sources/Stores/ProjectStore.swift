@@ -92,11 +92,13 @@ enum PersistenceError: Error, Equatable, LocalizedError {
     case backupUnavailable
     case corruptBackup(String)
     case workspaceNotFound(String)
+    case workspacePackConflict(String)
 
     var errorDescription: String? {
         switch self {
         case .corruptNativeStore(let message), .invalidLegacyStore(let message),
-             .corruptBackup(let message), .invalidProject(let message):
+             .corruptBackup(let message), .invalidProject(let message),
+             .workspacePackConflict(let message):
             message
         case .unsupportedSchema(let version):
             "Unsupported native store schema version: \(version)."
@@ -325,22 +327,52 @@ final class ProjectStore {
     func importWorkspacePack(_ pack: ReviewedWorkspacePack) throws -> NativeStoreDocument {
         var document = try load()
         let timestamp = now()
-        var savedIDByPackID: [String: String] = [:]
-        let packPath = pack.packURL.standardizedFileURL.path
+        let packPath = canonicalPath(pack.packURL.path)
+        let importedProjectIDs = pack.projects.map(\.id)
+        guard Set(importedProjectIDs).count == importedProjectIDs.count else {
+            throw PersistenceError.workspacePackConflict(
+                "Workspace manifest project identities are not unique. Review the manifest again."
+            )
+        }
 
+        // Resolve every manifest identity before materialising any project. A
+        // dependency must always point at the saved LocalWrap ID, including on
+        // the first import when that ID needs a collision-safe suffix.
+        let projectMatches = try workspacePackProjectMatches(
+            pack.projects,
+            savedProjects: document.projects,
+            packPath: packPath
+        )
+        var reservedProjectIDs = Set(document.projects.map(\.id))
+        var savedIDByPackID: [String: String] = [:]
         for imported in pack.projects {
-            let provenanceIndex = document.projects.firstIndex {
-                $0.source?.type == "workspace-pack"
-                    && $0.source?.packPath == packPath
-                    && $0.source?.packProjectId == imported.id
+            if let index = projectMatches[imported.id] {
+                savedIDByPackID[imported.id] = document.projects[index].id
+            } else {
+                let savedID = reserveWorkspacePackID(
+                    preferred: imported.draft.id ?? imported.id,
+                    reserved: &reservedProjectIDs
+                )
+                savedIDByPackID[imported.id] = savedID
             }
-            let fallbackIndex = document.projects.firstIndex {
-                $0.cwd == imported.draft.cwd && $0.command == imported.draft.command
-            }
-            let index = provenanceIndex ?? fallbackIndex
+        }
+
+        var didChange = false
+        for imported in pack.projects {
+            let index = projectMatches[imported.id]
             let existing = index.map { document.projects[$0] }
             var draft = imported.draft
-            draft.id = existing?.id ?? draft.id ?? makeID()
+            draft.id = savedIDByPackID[imported.id]
+            draft.dependsOn = try imported.draft.dependsOn.map { dependencies in
+                try dependencies.map { dependencyID in
+                    guard let savedID = savedIDByPackID[dependencyID] else {
+                        throw PersistenceError.workspacePackConflict(
+                            "Workspace manifest dependency \"\(dependencyID)\" is unresolved. Review the manifest again."
+                        )
+                    }
+                    return savedID
+                }
+            }
             draft.source = ProjectSource(
                 type: "workspace-pack",
                 packPath: packPath,
@@ -350,26 +382,60 @@ final class ProjectStore {
             if let existing {
                 project.createdAt = existing.createdAt
                 project.updatedAt = existing.updatedAt
+                if project != existing {
+                    project.updatedAt = timestamp
+                    didChange = true
+                }
+            } else {
+                didChange = true
             }
             if let index {
                 document.projects[index] = project
             } else {
                 document.projects.append(project)
             }
-            savedIDByPackID[imported.id] = project.id
         }
 
+        let importedProfileIDs = pack.profiles.map(\.id)
+        guard Set(importedProfileIDs).count == importedProfileIDs.count else {
+            throw PersistenceError.workspacePackConflict(
+                "Workspace manifest workspace identities are not unique. Review the manifest again."
+            )
+        }
+        var reservedProfileIDs = Set(document.workspace.savedWorkspaces.map(\.id))
         for imported in pack.profiles {
-            let projectIDs = imported.projectIDs.compactMap { savedIDByPackID[$0] }
-            guard !projectIDs.isEmpty else { continue }
-            let provenanceIndex = document.workspace.savedWorkspaces.firstIndex {
-                $0.source?.type == "workspace-pack"
-                    && $0.source?.packPath == packPath
-                    && $0.source?.packWorkspaceId == imported.id
+            let projectIDs = try imported.projectIDs.map { packProjectID in
+                guard let savedID = savedIDByPackID[packProjectID] else {
+                    throw PersistenceError.workspacePackConflict(
+                        "Workspace \"\(imported.name)\" references an unresolved project. Review the manifest again."
+                    )
+                }
+                return savedID
             }
+            guard !projectIDs.isEmpty else {
+                throw PersistenceError.workspacePackConflict(
+                    "Workspace \"\(imported.name)\" must contain at least one project."
+                )
+            }
+            let provenanceMatches = document.workspace.savedWorkspaces.indices.filter { index in
+                let source = document.workspace.savedWorkspaces[index].source
+                return source?.type == "workspace-pack"
+                    && source.map { canonicalPath($0.packPath) } == packPath
+                    && source?.packWorkspaceId == imported.id
+            }
+            guard provenanceMatches.count <= 1 else {
+                throw PersistenceError.workspacePackConflict(
+                    "Multiple saved workspaces claim manifest identity \"\(imported.id)\". Resolve the duplicate before importing."
+                )
+            }
+            let provenanceIndex = provenanceMatches.first
             let existing = provenanceIndex.map { document.workspace.savedWorkspaces[$0] }
-            let profile = WorkspaceProfile(
-                id: existing?.id ?? makeID(),
+            let profileID = existing?.id ?? reserveWorkspacePackID(
+                preferred: imported.id,
+                reserved: &reservedProfileIDs
+            )
+            var profile = WorkspaceProfile(
+                id: profileID,
                 name: imported.name,
                 projectIds: projectIDs,
                 createdAt: existing?.createdAt ?? timestamp,
@@ -381,15 +447,95 @@ final class ProjectStore {
                     packWorkspaceId: imported.id
                 )
             )
+            if let existing, profile != existing {
+                profile.updatedAt = timestamp
+                didChange = true
+            } else if existing == nil {
+                didChange = true
+            }
             if let provenanceIndex {
                 document.workspace.savedWorkspaces[provenanceIndex] = profile
             } else {
                 document.workspace.savedWorkspaces.append(profile)
             }
         }
-        document.workspace.updatedAt = timestamp
-        try save(document)
-        return try load()
+        if didChange {
+            document.workspace.updatedAt = timestamp
+            try save(document)
+            return try load()
+        }
+        return document
+    }
+
+    private func workspacePackProjectMatches(
+        _ importedProjects: [ReviewedWorkspacePackProject],
+        savedProjects: [Project],
+        packPath: String
+    ) throws -> [String: Int] {
+        var result: [String: Int] = [:]
+        var claimedSavedIndices = Set<Int>()
+        var unmatchedByDirectory: [String: [ReviewedWorkspacePackProject]] = [:]
+
+        for imported in importedProjects {
+            let provenanceMatches = savedProjects.indices.filter { index in
+                let source = savedProjects[index].source
+                return source?.type == "workspace-pack"
+                    && source.map { canonicalPath($0.packPath) } == packPath
+                    && source?.packProjectId == imported.id
+            }
+            guard provenanceMatches.count <= 1 else {
+                throw PersistenceError.workspacePackConflict(
+                    "Multiple saved projects claim manifest identity \"\(imported.id)\". Resolve the duplicate before importing."
+                )
+            }
+            if let index = provenanceMatches.first {
+                guard claimedSavedIndices.insert(index).inserted else {
+                    throw PersistenceError.workspacePackConflict(
+                        "A saved project matches more than one manifest project. Resolve its provenance before importing."
+                    )
+                }
+                result[imported.id] = index
+            } else {
+                unmatchedByDirectory[canonicalPath(imported.draft.cwd), default: []].append(imported)
+            }
+        }
+
+        for (directory, importedAtDirectory) in unmatchedByDirectory {
+            let savedAtDirectory = savedProjects.indices.filter {
+                !claimedSavedIndices.contains($0) && canonicalPath(savedProjects[$0].cwd) == directory
+            }
+            if savedAtDirectory.isEmpty {
+                continue
+            }
+            guard importedAtDirectory.count == 1, savedAtDirectory.count == 1 else {
+                let names = importedAtDirectory.map(\.name).sorted().joined(separator: ", ")
+                throw PersistenceError.workspacePackConflict(
+                    "Manifest projects \(names) cannot be matched safely to saved projects in \(directory). Resolve the duplicate folder mapping before importing."
+                )
+            }
+            let imported = importedAtDirectory[0]
+            let index = savedAtDirectory[0]
+            claimedSavedIndices.insert(index)
+            result[imported.id] = index
+        }
+        return result
+    }
+
+    private func reserveWorkspacePackID(preferred: String, reserved: inout Set<String>) -> String {
+        let trimmed = preferred.trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = trimmed.isEmpty ? "workspace-item" : trimmed
+        var candidate = base
+        var suffix = 2
+        while reserved.contains(candidate) {
+            candidate = "\(base)-\(suffix)"
+            suffix += 1
+        }
+        reserved.insert(candidate)
+        return candidate
+    }
+
+    private func canonicalPath(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath().path
     }
 
     func hasBackup() -> Bool {

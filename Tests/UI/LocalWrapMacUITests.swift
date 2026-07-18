@@ -151,6 +151,29 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(app.buttons["addRepositoryButton"].exists)
     }
 
+    func testWorkspaceManifestReviewShowsFullStoppedImportContract() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ApplePersistenceIgnoreState", "YES", "--ui-test-workspace-manifest-review",
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["workspacePackReviewTitle"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.staticTexts["Review Workspace Manifest"].exists)
+        XCTAssertTrue(app.staticTexts["Fixture Stack"].exists)
+        XCTAssertTrue(app.staticTexts["Import only saves reviewed configuration. It does not start projects or execute commands."].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-web"].exists)
+        XCTAssertTrue(app.staticTexts["npm run dev"].exists)
+        XCTAssertTrue(app.staticTexts["Port 5173  •  http://localhost:5173"].exists)
+        XCTAssertTrue(app.staticTexts["api"].exists)
+        XCTAssertTrue(app.staticTexts["/health"].exists)
+        XCTAssertTrue(app.buttons["cancelWorkspacePackImport"].exists)
+        XCTAssertTrue(app.buttons["confirmWorkspacePackImport"].isEnabled)
+    }
+
     func testStandardAboutPanelUsesNativeBundleMetadata() {
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]

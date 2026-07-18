@@ -7,7 +7,6 @@ struct WorkspaceDetailView: View {
     @State private var target: WorkspaceTarget
     @State private var importing = false
     @State private var exporting = false
-    @State private var reviewedPack: ReviewedWorkspacePack?
     @State private var exportRoot: URL?
     @State private var confirmOverwrite = false
     @State private var editingProfile = false
@@ -98,7 +97,7 @@ struct WorkspaceDetailView: View {
             stopAll: { Task { await appModel.stopAllProjects() } }
         ))
         .fileImporter(isPresented: $importing, allowedContentTypes: [.folder]) { result in
-            do { reviewedPack = try appModel.reviewWorkspacePack(rootURL: result.get()) }
+            do { appModel.reviewRepository(at: try result.get()) }
             catch { appModel.errorMessage = error.localizedDescription }
         }
         .fileImporter(isPresented: $exporting, allowedContentTypes: [.folder]) { result in
@@ -117,9 +116,6 @@ struct WorkspaceDetailView: View {
                 if let exportRoot { _ = appModel.exportWorkspacePack(rootURL: exportRoot, overwrite: true) }
             }
             Button("Cancel", role: .cancel) {}
-        }
-        .sheet(item: $reviewedPack) { pack in
-            WorkspacePackReviewView(pack: pack) { appModel.importWorkspacePack(pack) }
         }
         .sheet(isPresented: $editingProfile) {
             profileEditor

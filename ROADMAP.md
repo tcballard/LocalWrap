@@ -17,7 +17,7 @@ application is inspected, and its public behavior is documented.
 | --- | --- | --- |
 | 1. Live Preview v2 | In review | Existing loopback URL policy |
 | 2. Open Repository | In review | Repository inspection contract |
-| 3. Repository manifest | Planned | Open Repository review flow |
+| 3. Repository manifest | In review | Open Repository review flow |
 | 4. Runtime reconciliation | Planned | Process ownership ledger |
 | 5. Needs Attention | Planned | Reconciled runtime and Doctor issues |
 | 6. Menu-bar command center | Planned | Runtime reconciliation and Needs Attention |
