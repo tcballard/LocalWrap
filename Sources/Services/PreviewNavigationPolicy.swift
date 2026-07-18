@@ -6,6 +6,31 @@ enum PreviewNavigationDecision: Equatable, Sendable {
     case cancel
 }
 
+struct PreviewNavigationContext: Equatable, Sendable {
+    let url: URL?
+    let isMainFrame: Bool
+    let isUserActivated: Bool
+
+    init(url: URL?, isMainFrame: Bool, isUserActivated: Bool) {
+        self.url = url
+        self.isMainFrame = isMainFrame
+        self.isUserActivated = isUserActivated
+    }
+
+    static func resolvingWebKitFrames(
+        url: URL?,
+        targetFrameIsMain: Bool?,
+        sourceFrameIsMain: Bool,
+        isUserActivated: Bool
+    ) -> PreviewNavigationContext {
+        PreviewNavigationContext(
+            url: url,
+            isMainFrame: targetFrameIsMain ?? sourceFrameIsMain,
+            isUserActivated: isUserActivated
+        )
+    }
+}
+
 struct PreviewNavigationPolicy: Sendable {
     let localURLValidator: LocalURLValidator
 
@@ -14,7 +39,15 @@ struct PreviewNavigationPolicy: Sendable {
     }
 
     func decision(for url: URL?) -> PreviewNavigationDecision {
-        guard let url else { return .cancel }
+        decision(for: PreviewNavigationContext(
+            url: url,
+            isMainFrame: true,
+            isUserActivated: true
+        ))
+    }
+
+    func decision(for context: PreviewNavigationContext) -> PreviewNavigationDecision {
+        guard let url = context.url else { return .cancel }
         if localURLValidator.validate(url.absoluteString) {
             return .allow
         }
@@ -27,6 +60,7 @@ struct PreviewNavigationPolicy: Sendable {
         guard let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme) else {
             return .cancel
         }
+        guard context.isMainFrame, context.isUserActivated else { return .cancel }
         return .openExternal(url)
     }
 

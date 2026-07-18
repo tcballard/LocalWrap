@@ -104,7 +104,20 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["projectPreview"].waitForExistence(timeout: 3)
         )
-        XCTAssertTrue(app.buttons["reloadPreviewButton"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["projectLiveSplitView"].exists)
+        XCTAssertTrue(app.buttons["previewBackButton"].exists)
+        XCTAssertFalse(app.buttons["previewBackButton"].isEnabled)
+        XCTAssertTrue(app.buttons["previewForwardButton"].exists)
+        XCTAssertFalse(app.buttons["previewForwardButton"].isEnabled)
+        let reloadButton = app.buttons["reloadPreviewButton"]
+        let stopButton = app.buttons["stopPreviewButton"]
+        let reloadOrStop = XCTNSPredicateExpectation(
+            predicate: NSPredicate { _, _ in reloadButton.exists || stopButton.exists },
+            object: nil
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [reloadOrStop], timeout: 2), .completed)
+        XCTAssertTrue(app.descendants(matching: .any)["previewViewportPicker"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["previewURL"].exists)
         XCTAssertTrue(app.buttons["openPreviewExternalButton"].exists)
         let closePreview = app.buttons["closePreviewButton"]
         XCTAssertTrue(closePreview.exists)

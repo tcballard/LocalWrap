@@ -6,31 +6,30 @@ struct ProjectCockpitView: View {
     @Binding var selection: AppSelection?
     @State private var editorIsDirty = false
     @State private var previewState = PreviewState()
+    @State private var previewViewport: PreviewViewportPreset = .fit
     @State private var confirmsDeletion = false
 
     var body: some View {
         if let project = appModel.project(id: projectID) {
             let runtime = appModel.runtime(for: projectID)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    header(project: project, runtime: runtime)
-                    ProjectEditorView(
-                        project: project,
-                        runtime: runtime,
-                        selection: $selection,
-                        isDirty: $editorIsDirty
-                    )
-                        .frame(minHeight: 430)
-                    if previewState.isVisible {
+            Group {
+                if previewState.isVisible {
+                    HSplitView {
+                        projectContent(project: project, runtime: runtime)
+                            .frame(minWidth: 300, idealWidth: 430)
+
                         ProjectPreviewView(
                             project: project,
                             state: $previewState,
+                            viewport: $previewViewport,
                             openExternal: appModel.openExternalWebURL
                         )
+                        .frame(minWidth: 320, idealWidth: 560)
                     }
-                    logPanel(runtime: runtime)
+                    .accessibilityIdentifier("projectLiveSplitView")
+                } else {
+                    projectContent(project: project, runtime: runtime)
                 }
-                .padding(24)
             }
             .navigationTitle(project.name)
             .focusedSceneValue(
@@ -39,11 +38,16 @@ struct ProjectCockpitView: View {
             )
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button(action: openPreview) {
-                        Label("Preview", systemImage: "macwindow")
+                    Button(action: togglePreview) {
+                        Label(
+                            "Live Preview",
+                            systemImage: previewState.isVisible
+                                ? "rectangle.righthalf.inset.filled"
+                                : "rectangle.righthalf.inset"
+                        )
                     }
-                    .disabled(runtime.status != .ready || editorIsDirty || previewState.isVisible)
-                    .help("Preview Project")
+                    .disabled(runtime.status != .ready || editorIsDirty)
+                    .help(previewState.isVisible ? "Close Live Preview" : "Show Live Preview")
                     .accessibilityIdentifier("previewProjectButton")
 
                     Button { appModel.openProjectURL(id: projectID) } label: {
@@ -80,9 +84,34 @@ struct ProjectCockpitView: View {
                     previewState.close()
                 }
             }
+            .onChange(of: project.url) { _, value in
+                guard previewState.isVisible else { return }
+                guard let url = LocalURLValidator().url(from: value) else {
+                    previewState.close()
+                    return
+                }
+                previewState.open(url)
+            }
             .onDisappear { previewState.close() }
         } else {
             ContentUnavailableView("Project Not Found", systemImage: "questionmark.folder")
+        }
+    }
+
+    private func projectContent(project: Project, runtime: RuntimeSnapshot) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header(project: project, runtime: runtime)
+                ProjectEditorView(
+                    project: project,
+                    runtime: runtime,
+                    selection: $selection,
+                    isDirty: $editorIsDirty
+                )
+                .frame(minHeight: 430)
+                logPanel(runtime: runtime)
+            }
+            .padding(24)
         }
     }
 
@@ -174,7 +203,11 @@ struct ProjectCockpitView: View {
         Task { try? await appModel.restartProject(id: projectID) }
     }
 
-    private func openPreview() {
+    private func togglePreview() {
+        if previewState.isVisible {
+            previewState.close()
+            return
+        }
         guard let project = appModel.project(id: projectID),
               appModel.runtime(for: projectID).status == .ready,
               !editorIsDirty,

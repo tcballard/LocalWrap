@@ -19,24 +19,23 @@ struct PreviewWebView: NSViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
-        context.coordinator.loadedURL = initialURL
-        context.coordinator.lastReloadToken = state.reloadToken
+        context.coordinator.attach(to: webView, initialURL: initialURL, state: state)
         webView.load(URLRequest(url: initialURL))
         return webView
     }
 
     func updateNSView(_ webView: WKWebView, context: Context) {
         context.coordinator.parent = self
-        if context.coordinator.loadedURL != initialURL {
-            context.coordinator.loadedURL = initialURL
+        if context.coordinator.configuredURL != initialURL {
+            context.coordinator.reset(for: initialURL, state: state)
             webView.load(URLRequest(url: initialURL))
-        } else if context.coordinator.lastReloadToken != state.reloadToken {
-            context.coordinator.lastReloadToken = state.reloadToken
-            webView.reloadFromOrigin()
+            return
         }
+        context.coordinator.consumeRequests(state, in: webView)
     }
 
     static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        coordinator.detach()
         webView.stopLoading()
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
@@ -45,12 +44,78 @@ struct PreviewWebView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
         var parent: PreviewWebView
-        var loadedURL: URL?
-        var lastReloadToken = 0
+        private(set) var configuredURL: URL?
+
+        private var lastBackToken = 0
+        private var lastForwardToken = 0
+        private var lastReloadToken = 0
+        private var lastStopToken = 0
+        private var observations: [NSKeyValueObservation] = []
+        private var isAttached = false
         private let policy = PreviewNavigationPolicy()
 
         init(parent: PreviewWebView) {
             self.parent = parent
+        }
+
+        func attach(to webView: WKWebView, initialURL: URL, state: PreviewState) {
+            isAttached = true
+            reset(for: initialURL, state: state)
+            observations = [
+                webView.observe(\.url, options: [.new]) { [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+                webView.observe(\.title, options: [.new]) { [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+                webView.observe(\.canGoBack, options: [.new]) { [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+                webView.observe(\.canGoForward, options: [.new]) { [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+                webView.observe(\.estimatedProgress, options: [.new]) {
+                    [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+                webView.observe(\.isLoading, options: [.new]) { [weak self, weak webView] _, _ in
+                    Task { @MainActor in self?.scheduleSnapshot(from: webView) }
+                },
+            ]
+        }
+
+        func reset(for url: URL, state: PreviewState) {
+            configuredURL = url
+            lastBackToken = state.backToken
+            lastForwardToken = state.forwardToken
+            lastReloadToken = state.reloadToken
+            lastStopToken = state.stopToken
+        }
+
+        func detach() {
+            isAttached = false
+            observations.forEach { $0.invalidate() }
+            observations.removeAll()
+        }
+
+        func consumeRequests(_ state: PreviewState, in webView: WKWebView) {
+            if state.backToken != lastBackToken {
+                lastBackToken = state.backToken
+                if webView.canGoBack { webView.goBack() }
+            }
+            if state.forwardToken != lastForwardToken {
+                lastForwardToken = state.forwardToken
+                if webView.canGoForward { webView.goForward() }
+            }
+            if state.reloadToken != lastReloadToken {
+                lastReloadToken = state.reloadToken
+                webView.reloadFromOrigin()
+            }
+            if state.stopToken != lastStopToken {
+                lastStopToken = state.stopToken
+                webView.stopLoading()
+                finishStoppedLoad()
+            }
         }
 
         func webView(
@@ -58,13 +123,17 @@ struct PreviewWebView: NSViewRepresentable {
             decidePolicyFor navigationAction: WKNavigationAction,
             decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
         ) {
-            switch policy.decision(for: navigationAction.request.url) {
+            let context = navigationContext(for: navigationAction)
+            switch policy.decision(for: context) {
             case .allow:
                 decisionHandler(.allow)
             case .openExternal(let url):
                 parent.openExternal(url)
                 decisionHandler(.cancel)
             case .cancel:
+                if context.isMainFrame {
+                    parent.state.markFailed("Preview blocked a non-local or unsafe navigation.")
+                }
                 decisionHandler(.cancel)
             }
         }
@@ -81,18 +150,24 @@ struct PreviewWebView: NSViewRepresentable {
                 canShowMIMEType: navigationResponse.canShowMIMEType,
                 contentDisposition: contentDisposition
             )
+            if !allowed, navigationResponse.isForMainFrame {
+                parent.state.markFailed("Preview blocked a download or unsupported response.")
+            }
             decisionHandler(allowed ? .allow : .cancel)
         }
 
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation?) {
-            parent.state.status = .loading
-            parent.state.errorMessage = nil
+            parent.state.markLoading()
+            publishSnapshot(from: webView)
+        }
+
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation?) {
+            publishSnapshot(from: webView)
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation?) {
-            parent.state.status = .ready
-            parent.state.currentURL = webView.url
-            parent.state.errorMessage = nil
+            publishSnapshot(from: webView)
+            parent.state.markLoaded()
         }
 
         func webView(
@@ -100,7 +175,7 @@ struct PreviewWebView: NSViewRepresentable {
             didFail navigation: WKNavigation?,
             withError error: any Error
         ) {
-            fail(error)
+            fail(error, webView: webView)
         }
 
         func webView(
@@ -108,14 +183,12 @@ struct PreviewWebView: NSViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation?,
             withError error: any Error
         ) {
-            let nsError = error as NSError
-            guard nsError.code != NSURLErrorCancelled else { return }
-            fail(error)
+            fail(error, webView: webView)
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            parent.state.status = .failed
-            parent.state.errorMessage = "The preview web process stopped unexpectedly."
+            publishSnapshot(from: webView)
+            parent.state.markFailed("The preview web process stopped unexpectedly.")
         }
 
         func webView(
@@ -124,20 +197,67 @@ struct PreviewWebView: NSViewRepresentable {
             for navigationAction: WKNavigationAction,
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
-            switch policy.decision(for: navigationAction.request.url) {
+            let context = navigationContext(for: navigationAction)
+            switch policy.decision(for: context) {
             case .allow:
                 webView.load(navigationAction.request)
             case .openExternal(let url):
                 parent.openExternal(url)
             case .cancel:
-                break
+                if context.isMainFrame {
+                    parent.state.markFailed("Preview blocked a non-local or unsafe navigation.")
+                }
             }
             return nil
         }
 
-        private func fail(_ error: any Error) {
-            parent.state.status = .failed
-            parent.state.errorMessage = error.localizedDescription
+        private func navigationContext(
+            for navigationAction: WKNavigationAction
+        ) -> PreviewNavigationContext {
+            PreviewNavigationContext.resolvingWebKitFrames(
+                url: navigationAction.request.url,
+                targetFrameIsMain: navigationAction.targetFrame?.isMainFrame,
+                sourceFrameIsMain: navigationAction.sourceFrame.isMainFrame,
+                isUserActivated: navigationAction.navigationType == .linkActivated
+            )
+        }
+
+        private func fail(_ error: any Error, webView: WKWebView) {
+            let nsError = error as NSError
+            guard nsError.code != NSURLErrorCancelled else {
+                publishSnapshot(from: webView)
+                return
+            }
+            publishSnapshot(from: webView)
+            parent.state.markFailed(error.localizedDescription)
+        }
+
+        private func finishStoppedLoad() {
+            Task { @MainActor [weak self] in
+                guard let self, self.isAttached else { return }
+                if self.parent.state.hasLoadedContent {
+                    self.parent.state.markLoaded()
+                } else {
+                    self.parent.state.markFailed("Loading stopped.")
+                }
+            }
+        }
+
+        private func scheduleSnapshot(from webView: WKWebView?) {
+            guard let webView, isAttached else { return }
+            publishSnapshot(from: webView)
+        }
+
+        private func publishSnapshot(from webView: WKWebView) {
+            guard isAttached else { return }
+            parent.state.apply(PreviewWebSnapshot(
+                currentURL: webView.url,
+                pageTitle: webView.title,
+                canGoBack: webView.canGoBack,
+                canGoForward: webView.canGoForward,
+                estimatedProgress: webView.estimatedProgress,
+                isLoading: webView.isLoading
+            ))
         }
     }
 }

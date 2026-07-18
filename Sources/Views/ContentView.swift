@@ -94,6 +94,7 @@ struct ContentView: View {
             ProjectsOverviewView(selection: $selection)
         case .project(let id):
             ProjectCockpitView(projectID: id, selection: $selection)
+                .id(id)
         case .newProject:
             ScrollView {
                 ProjectEditorView(project: nil, selection: $selection)

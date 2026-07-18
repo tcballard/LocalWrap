@@ -4,6 +4,17 @@ LocalWrap is a native macOS cockpit for local development projects. Save local
 commands, start and monitor processes, diagnose configuration problems, preview
 loopback URLs, and resume dependency-aware workspaces without terminal juggling.
 
+## Live Preview
+
+When a project reaches Ready, choose **Live Preview** in its toolbar to open the
+running app beside its LocalWrap configuration. The native preview includes
+Back, Forward, Reload/Stop, current-URL browser handoff, and responsive, Phone,
+Tablet, and Desktop viewport widths. Embedded navigation is restricted to
+validated loopback HTTP(S) URLs; user-selected public links open in the default
+browser instead.
+
+The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
+
 ## Requirements
 
 - macOS 15 or newer
