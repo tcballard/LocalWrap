@@ -25,20 +25,25 @@ struct WelcomeDetailView: View {
                 .multilineTextAlignment(.center)
         } actions: {
             VStack(spacing: 16) {
+                Button("Open Repository…") {
+                    appModel.chooseRepository()
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Inspect a repository and review its configuration before adding it")
+                .accessibilityIdentifier("openRepositoryButton")
                 Button("Try Sample Project") {
                     if let project = appModel.trySampleProject() { didCreateSample(project) }
                 }
-                .buttonStyle(.borderedProminent)
                 .help("Copy and configure the bundled sample without starting it")
                 .accessibilityIdentifier("trySampleProjectButton")
                 HStack(spacing: 16) {
-                Label("Secure native execution", systemImage: "checkmark.shield.fill")
-                    .foregroundStyle(.green)
-                Label("macOS 15+", systemImage: "apple.logo")
-                    .foregroundStyle(.secondary)
+                    Label("Secure native execution", systemImage: "checkmark.shield.fill")
+                        .foregroundStyle(.green)
+                    Label("macOS 15+", systemImage: "apple.logo")
+                        .foregroundStyle(.secondary)
                 }
+                .font(.callout)
             }
-            .font(.callout)
         }
         .padding(48)
         .accessibilityIdentifier("welcomeDetail")

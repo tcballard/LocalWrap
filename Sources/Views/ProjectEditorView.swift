@@ -48,8 +48,16 @@ struct ProjectEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             if project == nil {
-                Text("Add Project")
-                    .font(.largeTitle.bold())
+                HStack {
+                    Text("Add Project")
+                        .font(.largeTitle.bold())
+                    Spacer()
+                    Button("Open Repository…") {
+                        appModel.chooseRepository()
+                    }
+                    .help("Detect configuration from a repository folder")
+                    .accessibilityIdentifier("chooseRepositoryFromAddButton")
+                }
             } else {
                 Text("Configuration")
                     .font(.title2.bold())

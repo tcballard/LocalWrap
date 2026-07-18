@@ -79,6 +79,11 @@ struct ContentView: View {
                 )
             }
         }
+        .sheet(item: repositoryProposalBinding) { proposal in
+            RepositoryReviewView(proposal: proposal) { project in
+                selection = .project(project.id)
+            }
+        }
     }
 
     @ViewBuilder
@@ -107,6 +112,13 @@ struct ContentView: View {
         Binding(
             get: { appModel.releaseNotice },
             set: { appModel.releaseNotice = $0 }
+        )
+    }
+
+    private var repositoryProposalBinding: Binding<RepositoryProposal?> {
+        Binding(
+            get: { appModel.repositoryProposal },
+            set: { if $0 == nil { appModel.dismissRepositoryProposal() } }
         )
     }
 }
