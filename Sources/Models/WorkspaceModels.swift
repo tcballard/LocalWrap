@@ -195,10 +195,7 @@ struct WorkspacePackProject: Codable, Equatable, Sendable {
         name = try values.decodeIfPresent(String.self, forKey: .name)
         path = try values.decodeIfPresent(String.self, forKey: .path)
         command = try values.decodeIfPresent(String.self, forKey: .command) ?? ""
-        port = try? values.decodeIfPresent(Int.self, forKey: .port)
-        if port == nil, let text = try? values.decode(String.self, forKey: .port) {
-            port = Int(text)
-        }
+        port = try values.decodeIfPresent(Int.self, forKey: .port)
         url = try values.decodeIfPresent(String.self, forKey: .url)
         autostart = try values.decodeIfPresent(Bool.self, forKey: .autostart)
         openOnReady = try values.decodeIfPresent(Bool.self, forKey: .openOnReady)
@@ -232,6 +229,78 @@ struct ReviewedWorkspacePackProfile: Identifiable, Equatable, Sendable {
     let id: String
     let name: String
     let projectIDs: [String]
+}
+
+enum WorkspacePackReviewSeverity: String, Equatable, Sendable {
+    case warning
+    case blocker
+}
+
+struct WorkspacePackReviewIssue: Identifiable, Equatable, Sendable {
+    let code: String
+    let severity: WorkspacePackReviewSeverity
+    let scope: String
+    let field: String?
+    let message: String
+
+    var id: String {
+        [severity.rawValue, code, scope, field ?? "", message].joined(separator: "|")
+    }
+}
+
+enum WorkspacePackChangeEntity: String, Equatable, Sendable {
+    case project
+    case workspace
+}
+
+enum WorkspacePackChangeDisposition: String, Equatable, Sendable {
+    case add
+    case update
+    case unchanged
+}
+
+struct WorkspacePackChange: Identifiable, Equatable, Sendable {
+    let entity: WorkspacePackChangeEntity
+    let entityID: String
+    let name: String
+    let disposition: WorkspacePackChangeDisposition
+    let existingSavedID: String?
+
+    var id: String { "\(entity.rawValue):\(entityID)" }
+}
+
+struct WorkspacePackReviewProject: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let path: String
+    let command: String
+    let port: Int
+    let url: String
+    let dependsOn: [String]
+    let healthCheck: HealthCheck?
+}
+
+struct WorkspacePackReviewProfile: Identifiable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let projectIDs: [String]
+}
+
+struct WorkspacePackReview: Identifiable, Equatable, Sendable {
+    let name: String
+    let rootURL: URL
+    let packURL: URL
+    let version: Int?
+    let projects: [WorkspacePackReviewProject]
+    let profiles: [WorkspacePackReviewProfile]
+    let issues: [WorkspacePackReviewIssue]
+    let changes: [WorkspacePackChange]
+    let pack: ReviewedWorkspacePack?
+
+    var id: String { packURL.path }
+    var blockers: [WorkspacePackReviewIssue] { issues.filter { $0.severity == .blocker } }
+    var warnings: [WorkspacePackReviewIssue] { issues.filter { $0.severity == .warning } }
+    var canImport: Bool { blockers.isEmpty && pack != nil }
 }
 
 struct WorkspacePackExportResult: Equatable, Sendable {

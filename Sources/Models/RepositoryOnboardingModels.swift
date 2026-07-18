@@ -1,5 +1,24 @@
 import Foundation
 
+enum RepositoryOpenProposal: Equatable, Identifiable, Sendable {
+    case project(RepositoryProposal)
+    case workspace(WorkspacePackReview)
+
+    var id: String {
+        switch self {
+        case .project(let proposal): "project:\(proposal.rootURL.path)"
+        case .workspace(let review): "workspace:\(review.packURL.path)"
+        }
+    }
+
+    var rootURL: URL {
+        switch self {
+        case .project(let proposal): proposal.rootURL
+        case .workspace(let review): review.rootURL
+        }
+    }
+}
+
 enum RepositoryValueSource: String, Equatable, Sendable {
     case packageJSON
     case directoryName

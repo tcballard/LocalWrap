@@ -1,6 +1,17 @@
+import Darwin
 import SwiftUI
 
 @main
+enum LocalWrapEntryPoint {
+    @MainActor
+    static func main() {
+        if let status = WorkspaceManifestCommand().run(arguments: CommandLine.arguments) {
+            Darwin.exit(status)
+        }
+        LocalWrapMacApp.main()
+    }
+}
+
 struct LocalWrapMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appModel = AppModel.forCurrentLaunch()

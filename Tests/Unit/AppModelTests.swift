@@ -64,6 +64,74 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(try fixture.store.listProjects(), [])
     }
 
+    func testManifestSelectionReviewsBeforeExplicitStoppedImport() throws {
+        let fixture = try makeFixture(name: "ManifestRepositoryPicker")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let manifestDirectory = fixture.projectDirectory
+            .appendingPathComponent(".localwrap", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try Data(#"{"localwrap":1,"name":"Fixture Stack","projects":[{"id":"app","path":".","command":"npm start","port":3000}]}"#.utf8)
+            .write(to: manifestDirectory.appendingPathComponent("workspace.json"))
+        let model = AppModel(
+            store: fixture.store,
+            directoryPicker: DirectoryPickerService(
+                chooseRepository: { fixture.projectDirectory }
+            )
+        )
+
+        model.chooseRepository()
+
+        guard case .workspace(let firstReview) = model.repositoryOpenProposal else {
+            return XCTFail("Expected workspace manifest review.")
+        }
+        XCTAssertTrue(firstReview.canImport)
+        XCTAssertEqual(try fixture.store.listProjects(), [])
+
+        model.dismissRepositoryProposal()
+        XCTAssertNil(model.repositoryOpenProposal)
+        XCTAssertEqual(try fixture.store.listProjects(), [])
+
+        model.reviewRepository(at: fixture.projectDirectory)
+        guard case .workspace(let review) = model.repositoryOpenProposal else {
+            return XCTFail("Expected workspace manifest review.")
+        }
+        XCTAssertTrue(model.importWorkspacePack(review))
+        XCTAssertNil(model.repositoryOpenProposal)
+        XCTAssertEqual(model.projects.map(\.name), ["app"])
+        XCTAssertEqual(try fixture.store.listProjects().map(\.name), ["app"])
+        XCTAssertEqual(model.runtime(for: model.projects[0].id).status, .stopped)
+    }
+
+    func testManifestImportDoesNotMutateRunningProjectConfiguration() throws {
+        let fixture = try makeFixture(name: "RunningManifestImport")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let packURL = fixture.projectDirectory.appendingPathComponent("localwrap.json")
+        try Data(#"{"localwrap":1,"projects":[{"id":"app","path":".","command":"npm start","port":3000}]}"#.utf8)
+            .write(to: packURL)
+        let packs = WorkspacePackService()
+        let firstReview = try packs.inspect(rootURL: fixture.projectDirectory)
+        let first = try packs.importReviewed(firstReview, into: fixture.store)
+        let project = try XCTUnwrap(first.projects.first)
+        try Data(#"{"localwrap":1,"projects":[{"id":"app","path":".","command":"npm run dev","port":3000}]}"#.utf8)
+            .write(to: packURL)
+        let updateReview = try packs.inspect(
+            rootURL: fixture.projectDirectory,
+            projects: first.projects,
+            workspace: first.workspace
+        )
+        let model = AppModel(
+            projects: first.projects,
+            workspace: first.workspace,
+            initialRuntimes: [project.id: RuntimeSnapshot(status: .ready)],
+            store: fixture.store,
+            workspacePacks: packs
+        )
+
+        XCTAssertFalse(model.importWorkspacePack(updateReview))
+        XCTAssertTrue(model.errorMessage?.contains("Stop these projects") == true)
+        XCTAssertEqual(try fixture.store.project(id: project.id)?.command, "npm start")
+    }
+
     func testLiveModelLoadsPersistedCounts() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AppModel-\(UUID().uuidString)", isDirectory: true)

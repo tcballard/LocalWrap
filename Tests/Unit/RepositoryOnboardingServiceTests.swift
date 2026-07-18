@@ -75,6 +75,44 @@ final class RepositoryOnboardingServiceTests: XCTestCase {
         XCTAssertEqual(proposal.source(for: .command, currentDraft: edited), "Detected from package.json scripts")
     }
 
+    func testWorkspaceManifestWinsOverPackageInspectionAndOnlyProducesReview() throws {
+        let root = try repository(packageJSON: #"{"name":"package-name","scripts":{"dev":"vite"}}"#)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let manifestDirectory = root.appendingPathComponent(".localwrap", isDirectory: true)
+        try FileManager.default.createDirectory(at: manifestDirectory, withIntermediateDirectories: true)
+        try Data(#"{"localwrap":1,"name":"Manifest Stack","projects":[{"id":"app","path":".","command":"npm start","port":3000}]}"#.utf8)
+            .write(to: manifestDirectory.appendingPathComponent("workspace.json"))
+        let service = RepositoryOnboardingService(inspector: ProjectInspectionService(
+            portSuggester: PortSuggestionService { _ in true }
+        ))
+
+        let proposal = try service.openProposal(directory: root, projects: [], workspace: .empty)
+
+        guard case .workspace(let review) = proposal else {
+            return XCTFail("Expected the repository manifest review to take precedence.")
+        }
+        XCTAssertEqual(review.name, "Manifest Stack")
+        XCTAssertTrue(review.canImport)
+        XCTAssertEqual(review.projects.map(\.command), ["npm start"])
+    }
+
+    func testRepositoryWithoutManifestFallsThroughToProjectProposal() throws {
+        let root = try repository(packageJSON: #"{"name":"demo","scripts":{"dev":"vite"}}"#)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+
+        let proposal = try RepositoryOnboardingService().openProposal(
+            directory: root,
+            projects: [],
+            workspace: .empty
+        )
+
+        guard case .project(let project) = proposal else {
+            return XCTFail("Expected ordinary repository inspection.")
+        }
+        XCTAssertEqual(project.draft.name, "demo")
+        XCTAssertEqual(project.draft.command, "npm run dev")
+    }
+
     private func repository(packageJSON: String) throws -> URL {
         let parent = FileManager.default.temporaryDirectory
             .appendingPathComponent("RepositoryOnboarding-\(UUID().uuidString)", isDirectory: true)

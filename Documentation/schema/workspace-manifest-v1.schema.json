@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://localwrap.dev/schema/workspace-manifest-v1.schema.json",
+  "title": "LocalWrap workspace manifest v1",
+  "description": "A reviewed, repository-native contract for local projects. Secret-bearing and unsupported fields are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "localwrap",
+    "projects"
+  ],
+  "properties": {
+    "localwrap": {
+      "description": "LocalWrap workspace manifest format version.",
+      "const": 1
+    },
+    "name": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "projects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/project"
+      }
+    },
+    "workspaces": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/workspace"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "identifier": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        {
+          "maxLength": 128
+        }
+      ]
+    },
+    "projectReference": {
+      "$ref": "#/$defs/identifier"
+    },
+    "loopbackURL": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://(?:localhost|127\\.0\\.0\\.1|\\[::1\\]):[0-9]{4,5}(?:[/?#].*)?$"
+    },
+    "healthCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/"
+        },
+        "url": {
+          "$ref": "#/$defs/loopbackURL"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "path"
+          ]
+        },
+        {
+          "required": [
+            "url"
+          ]
+        }
+      ]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "command": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 65535
+        },
+        "url": {
+          "$ref": "#/$defs/loopbackURL"
+        },
+        "autostart": {
+          "type": "boolean"
+        },
+        "openOnReady": {
+          "type": "boolean"
+        },
+        "dependsOn": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/projectReference"
+          }
+        },
+        "healthCheck": {
+          "$ref": "#/$defs/healthCheck"
+        }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projects"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/identifier"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "projects": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/projectReference"
+          }
+        }
+      }
+    }
+  }
+}
