@@ -16,6 +16,7 @@ struct InspectionWarning: Equatable, Sendable {
 struct ProjectInspection: Equatable, Sendable {
     let cwd: String
     let name: String
+    let nameSource: RepositoryValueSource
     let scripts: [PackageScript]
     let recommendedCommand: String
     let suggestedPort: Int
@@ -64,6 +65,7 @@ final class ProjectInspectionService {
             return ProjectInspection(
                 cwd: "",
                 name: "Untitled Project",
+                nameSource: .directoryName,
                 scripts: [],
                 recommendedCommand: "npm run dev",
                 suggestedPort: preferredPort,
@@ -77,6 +79,7 @@ final class ProjectInspectionService {
             return ProjectInspection(
                 cwd: path,
                 name: directory.lastPathComponent.isEmpty ? "Untitled Project" : directory.lastPathComponent,
+                nameSource: .directoryName,
                 scripts: [],
                 recommendedCommand: "npm run dev",
                 suggestedPort: preferredPort,
@@ -126,6 +129,9 @@ final class ProjectInspectionService {
             cwd: path,
             name: packageName?.trimmingCharacters(in: .whitespacesAndNewlines).nonempty
                 ?? directory.lastPathComponent,
+            nameSource: packageName?.trimmingCharacters(in: .whitespacesAndNewlines).nonempty == nil
+                ? .directoryName
+                : .packageJSON,
             scripts: scripts,
             recommendedCommand: scripts.first?.command ?? "npm run dev",
             suggestedPort: port,

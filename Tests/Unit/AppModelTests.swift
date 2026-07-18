@@ -28,6 +28,42 @@ final class AppModelTests: XCTestCase {
         )
     }
 
+    func testCancellingRepositoryPickerDoesNotCreateAProposalOrProject() {
+        let model = AppModel(directoryPicker: DirectoryPickerService(chooseRepository: { nil }))
+
+        model.chooseRepository()
+
+        XCTAssertNil(model.repositoryProposal)
+        XCTAssertTrue(model.projects.isEmpty)
+    }
+
+    func testChoosingRepositoryCreatesReviewProposalWithoutPersistence() throws {
+        let fixture = try makeFixture(name: "RepositoryPicker")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = AppModel(
+            directoryPicker: DirectoryPickerService(
+                chooseRepository: { fixture.projectDirectory }
+            ),
+            repositoryOnboarding: RepositoryOnboardingService(
+                inspector: ProjectInspectionService(
+                    portSuggester: PortSuggestionService { _ in true }
+                )
+            )
+        )
+
+        model.chooseRepository()
+
+        XCTAssertEqual(model.repositoryProposal?.rootURL.path, fixture.projectDirectory.path)
+        XCTAssertEqual(model.repositoryProposal?.draft.command, "npm start")
+        XCTAssertTrue(model.projects.isEmpty)
+        XCTAssertEqual(try fixture.store.listProjects(), [])
+
+        model.dismissRepositoryProposal()
+
+        XCTAssertNil(model.repositoryProposal)
+        XCTAssertEqual(try fixture.store.listProjects(), [])
+    }
+
     func testLiveModelLoadsPersistedCounts() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("AppModel-\(UUID().uuidString)", isDirectory: true)
@@ -121,6 +157,45 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.projectCount, 1)
         XCTAssertEqual(model.projects.first?.name, "Renamed")
         XCTAssertEqual(try store.listProjects().first?.id, "project")
+    }
+
+    func testSaveAndStartReturnsPersistedProjectWhenLaunchFails() async throws {
+        let fixture = try makeFixture(name: "SaveThenStart")
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let doctor = ProjectDoctorService(
+            portSuggester: PortSuggestionService(isAvailable: { _ in true })
+        )
+        let runtime = RuntimeService(
+            environmentResolver: EnvironmentResolver(
+                environment: { ["PATH": "/missing"] },
+                isExecutable: { _ in false }
+            ),
+            doctor: doctor,
+            isDirectory: { _ in true }
+        )
+        let model = AppModel.live(
+            store: fixture.store,
+            runtimeService: runtime,
+            doctorService: doctor
+        )
+        let draft = ProjectDraft(
+            name: "Demo",
+            cwd: fixture.projectDirectory.path,
+            command: "npm start",
+            port: 3_000,
+            url: "http://localhost:3000"
+        )
+
+        let result = await model.saveProject(
+            draft: draft,
+            existingID: nil,
+            startAfterSave: true
+        )
+
+        XCTAssertEqual(result?.id, "project")
+        XCTAssertEqual(model.projectCount, 1)
+        XCTAssertEqual(try fixture.store.listProjects().map(\.id), ["project"])
+        XCTAssertNotNil(model.errorMessage)
     }
 
     func testDraftAndSavedDoctorFixesRespectPersistenceAndDirtyGuards() async throws {

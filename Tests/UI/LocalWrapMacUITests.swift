@@ -127,6 +127,30 @@ final class LocalWrapMacUITests: XCTestCase {
         )
     }
 
+    func testOpenRepositoryReviewIsEditableAndExplicitlySafe() {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-ApplePersistenceIgnoreState", "YES", "--ui-test-repository-review",
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["repositoryReviewSheet"]
+                .waitForExistence(timeout: 5)
+        )
+        XCTAssertTrue(app.staticTexts["Review Repository"].exists)
+        XCTAssertTrue(app.staticTexts["Nothing runs until you explicitly choose Add & Start."].exists)
+        XCTAssertTrue(app.textFields["repositoryNameField"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["repositoryScriptPicker"].exists)
+        XCTAssertTrue(app.textFields["repositoryCommandField"].exists)
+        XCTAssertTrue(app.textFields["repositoryPortField"].exists)
+        XCTAssertTrue(app.textFields["repositoryURLField"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["repositoryWarning-review-fixture"].exists)
+        XCTAssertTrue(app.buttons["cancelRepositoryReviewButton"].exists)
+        XCTAssertTrue(app.buttons["addAndStartRepositoryButton"].exists)
+        XCTAssertTrue(app.buttons["addRepositoryButton"].exists)
+    }
+
     func testStandardAboutPanelUsesNativeBundleMetadata() {
         let app = XCUIApplication()
         app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]

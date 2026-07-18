@@ -17,6 +17,7 @@ final class ProjectInspectionServiceTests: XCTestCase {
         let result = try service.inspect(directory: root, preferredPort: 3_000)
 
         XCTAssertEqual(result.name, "demo-app")
+        XCTAssertEqual(result.nameSource, .packageJSON)
         XCTAssertEqual(result.scripts.map(\.name), ["dev", "start", "test"])
         XCTAssertEqual(result.recommendedCommand, "npm run dev")
         XCTAssertEqual(result.suggestedPort, 3_001)

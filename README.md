@@ -13,6 +13,16 @@ Tablet, and Desktop viewport widths. Embedded navigation is restricted to
 validated loopback HTTP(S) URLs; user-selected public links open in the default
 browser instead.
 
+## Open Repository
+
+Choose **Open Repository…** from the welcome screen, File menu, or Add Project
+screen to inspect an existing repository. LocalWrap proposes a project name,
+package script, available port, and loopback URL, then shows every value and its
+source in a review sheet. Folder selection never saves or runs anything:
+**Add Project** saves the reviewed configuration in a stopped state, while
+**Add & Start** is the explicit execution action. Ambiguous or unsupported
+repositories stay editable and require a command before they can be added.
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements

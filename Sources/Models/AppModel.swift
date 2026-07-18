@@ -18,6 +18,7 @@ final class AppModel {
     var releaseNotice: ReleaseNotice?
     var selectedWorkspaceTarget: WorkspaceTarget?
     var errorMessage: String?
+    private(set) var repositoryProposal: RepositoryProposal?
 
     private let store: ProjectStore?
     private let runtimeService: RuntimeService
@@ -31,6 +32,8 @@ final class AppModel {
     private let currentVersion: @Sendable () -> String
     private let sampleService: SampleProjectService
     private let sampleDestination: @Sendable () -> URL
+    private let directoryPicker: DirectoryPickerService
+    private let repositoryOnboarding: RepositoryOnboardingService
     private var openedReadyRunIDs: Set<String>
 
     init(
@@ -58,7 +61,10 @@ final class AppModel {
         sampleDestination: @escaping @Sendable () -> URL = {
             FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("LocalWrap Sample Project", isDirectory: true)
-        }
+        },
+        directoryPicker: DirectoryPickerService = .live,
+        repositoryOnboarding: RepositoryOnboardingService = RepositoryOnboardingService(),
+        repositoryProposal: RepositoryProposal? = nil
     ) {
         self.projects = projects
         self.workspace = workspace
@@ -90,6 +96,9 @@ final class AppModel {
         self.currentVersion = currentVersion
         self.sampleService = sampleService
         self.sampleDestination = sampleDestination
+        self.directoryPicker = directoryPicker
+        self.repositoryOnboarding = repositoryOnboarding
+        self.repositoryProposal = repositoryProposal
         openedReadyRunIDs = []
     }
 
@@ -150,6 +159,32 @@ final class AppModel {
 
     static func forCurrentLaunch() -> AppModel {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-repository-review") {
+            let draft = ProjectDraft(
+                name: "Review Fixture",
+                cwd: "/tmp",
+                command: "npm run dev",
+                port: 4_321,
+                url: "http://localhost:4321"
+            )
+            return AppModel(repositoryProposal: RepositoryProposal(
+                rootURL: URL(fileURLWithPath: "/tmp", isDirectory: true),
+                scripts: [PackageScript(
+                    name: "dev",
+                    command: "npm run dev",
+                    script: "vite",
+                    preferred: true
+                )],
+                warnings: [InspectionWarning(
+                    field: ProjectField.command.rawValue,
+                    code: "review-fixture",
+                    message: "Confirm the detected command before adding this project."
+                )],
+                nameSource: .directoryName,
+                commandSource: .packageScript,
+                draft: draft
+            ))
+        }
         if ProcessInfo.processInfo.arguments.contains("--ui-test-preview") {
             let id = "ui-preview"
             return AppModel(
@@ -191,6 +226,20 @@ final class AppModel {
         projects.first { $0.id == id }
     }
 
+    func chooseRepository() {
+        guard let directory = directoryPicker.choose() else { return }
+        do {
+            repositoryProposal = try repositoryOnboarding.propose(directory: directory)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func dismissRepositoryProposal() {
+        repositoryProposal = nil
+    }
+
     func runtime(for projectID: String) -> RuntimeSnapshot {
         runtimes[projectID] ?? RuntimeSnapshot()
     }
@@ -217,7 +266,11 @@ final class AppModel {
             try reloadPersistence()
             errorMessage = nil
             if startAfterSave {
-                try await startProject(id: project.id)
+                do {
+                    try await startProject(id: project.id)
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
             }
             return project
         } catch {

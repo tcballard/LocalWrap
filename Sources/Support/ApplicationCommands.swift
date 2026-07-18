@@ -13,6 +13,18 @@ struct ApplicationCommands: Commands {
             .disabled(appModel.isCheckingForUpdates)
         }
 
-        CommandGroup(replacing: .newItem) {}
+        CommandGroup(replacing: .newItem) {
+            Button("Open Repository…") {
+                showMainWindow()
+                appModel.chooseRepository()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(!canOpenRepository)
+        }
+    }
+
+    private var canOpenRepository: Bool {
+        if case .ready = appModel.persistenceStatus { return true }
+        return false
     }
 }
