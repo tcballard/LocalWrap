@@ -33,6 +33,8 @@ final class LocalWrapMacUITests: XCTestCase {
         let doctorPanel = app.descendants(matching: .any)["projectDoctorPanel"]
         XCTAssertTrue(doctorPanel.waitForExistence(timeout: 2))
         app.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 500)
+        XCTAssertFalse(app.descendants(matching: .any)["doctorSummary"].exists)
+        doctorPanel.click()
         XCTAssertTrue(
             app.descendants(matching: .any)["doctorSummary"].waitForExistence(timeout: 2)
         )
@@ -56,12 +58,17 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["workspaceDoctorPanel"].waitForExistence(timeout: 3)
         )
+        XCTAssertFalse(
+            app.descendants(matching: .any)["workspaceDoctorCheck-projects"].exists
+        )
+        app.descendants(matching: .any)["workspaceDoctorPanel"].click()
         for check in [
             "projects", "startup", "directories", "commands",
             "dependencies", "environment", "ports", "urls",
         ] {
             XCTAssertTrue(
-                app.descendants(matching: .any)["workspaceDoctorCheck-\(check)"].exists,
+                app.descendants(matching: .any)["workspaceDoctorCheck-\(check)"]
+                    .waitForExistence(timeout: 2),
                 "Missing Workspace Doctor check \(check)"
             )
         }
@@ -71,6 +78,56 @@ final class LocalWrapMacUITests: XCTestCase {
             XCTAssertFalse(app.buttons["startAllWorkspaceButton"].isEnabled)
             XCTAssertFalse(app.buttons["exportWorkspaceButton"].isEnabled)
         }
+    }
+
+    func testProjectDoctorAutoExpandsForNewFailureAndHonorsManualCollapse() {
+        let app = XCUIApplication()
+        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES", "--ui-test-preview"]
+        app.launch()
+
+        let doctorPanel = app.descendants(matching: .any)["projectDoctorPanel"]
+        XCTAssertTrue(doctorPanel.waitForExistence(timeout: 5))
+
+        let saveButton = app.buttons["saveProjectButton"]
+        XCTAssertTrue(saveButton.waitForExistence(timeout: 2))
+        let healthyDiagnosis = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == true"),
+            object: saveButton
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [healthyDiagnosis], timeout: 3), .completed)
+
+        let summary = app.descendants(matching: .any)["doctorSummary"]
+        XCTAssertFalse(summary.exists)
+
+        let commandField = app.textFields["projectCommandField"]
+        XCTAssertTrue(commandField.waitForExistence(timeout: 2))
+        commandField.click()
+        commandField.typeKey("a", modifierFlags: .command)
+        commandField.typeKey(XCUIKeyboardKey.delete.rawValue, modifierFlags: [])
+
+        XCTAssertTrue(
+            summary.waitForExistence(timeout: 3),
+            "A newly introduced command failure should expand Project Doctor"
+        )
+
+        app.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 500)
+        doctorPanel.click()
+        XCTAssertTrue(summary.waitForNonExistence(timeout: 2))
+
+        app.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: -500)
+        commandField.click()
+        commandField.typeText(" ")
+
+        let repeatedFailureDoesNotReopen = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true"),
+            object: summary
+        )
+        repeatedFailureDoesNotReopen.isInverted = true
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [repeatedFailureDoesNotReopen], timeout: 1),
+            .completed,
+            "Repeating the same failure should preserve the user's manual collapse"
+        )
     }
 
     func testClosingMainWindowHidesAndApplicationActivationReopensIt() {

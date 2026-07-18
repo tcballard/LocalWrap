@@ -5,57 +5,115 @@ struct DoctorPanelView: View {
     let actionsDisabled: Bool
     let perform: (DoctorActionID) -> Void
 
-    @State private var isExpanded = true
+    @State private var disclosure = DoctorDisclosureState()
     @State private var timelineExpanded = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(diagnosis.summary)
-                    .font(.callout.weight(.medium))
-                    .accessibilityIdentifier("doctorSummary")
+        VStack(alignment: .leading, spacing: 0) {
+            DoctorDisclosureHeader(
+                title: "Project Doctor",
+                systemImage: panelIcon,
+                iconColor: panelColor,
+                summary: compactSummary,
+                accessibilityIdentifier: "projectDoctorPanel",
+                isExpanded: expansionBinding
+            )
 
-                VStack(spacing: 0) {
-                    ForEach(diagnosis.checks) { check in
-                        checkRow(check)
-                        if check.id != DoctorCheckID.allCases.last { Divider() }
-                    }
-                }
-                .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+            if disclosure.isExpanded {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(diagnosis.summary)
+                        .font(.callout.weight(.medium))
+                        .accessibilityIdentifier("doctorSummary")
 
-                HStack {
-                    ForEach(diagnosis.actions, id: \.rawValue) { action in
-                        Button(action.label) { perform(action) }
-                            .disabled(action.mutatesProject && actionsDisabled)
-                            .accessibilityIdentifier("doctorAction-\(action.rawValue)")
-                    }
-                    Spacer()
-                    Button(DoctorActionID.copyReport.label) { perform(.copyReport) }
-                        .accessibilityIdentifier("doctorAction-copy-report")
-                }
-
-                DisclosureGroup("Timeline", isExpanded: $timelineExpanded) {
-                    if diagnosis.timeline.isEmpty {
-                        Text("No timeline events.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(diagnosis.timeline) { event in
-                            Text("\(event.at)  \(event.message)")
-                                .font(.caption.monospaced())
-                                .textSelection(.enabled)
+                    VStack(spacing: 0) {
+                        ForEach(diagnosis.checks) { check in
+                            checkRow(check)
+                            if check.id != DoctorCheckID.allCases.last { Divider() }
                         }
                     }
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+
+                    HStack {
+                        ForEach(diagnosis.actions, id: \.rawValue) { action in
+                            Button(action.label) { perform(action) }
+                                .disabled(action.mutatesProject && actionsDisabled)
+                                .accessibilityIdentifier("doctorAction-\(action.rawValue)")
+                        }
+                        Spacer()
+                        Button(DoctorActionID.copyReport.label) { perform(.copyReport) }
+                            .accessibilityIdentifier("doctorAction-copy-report")
+                    }
+
+                    DisclosureGroup("Timeline", isExpanded: $timelineExpanded) {
+                        if diagnosis.timeline.isEmpty {
+                            Text("No timeline events.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(diagnosis.timeline) { event in
+                                Text("\(event.at)  \(event.message)")
+                                    .font(.caption.monospaced())
+                                    .textSelection(.enabled)
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("doctorTimeline")
                 }
-                .accessibilityIdentifier("doctorTimeline")
+                .padding(.bottom, 10)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(.top, 10)
-        } label: {
-            Label("Project Doctor", systemImage: panelIcon)
-                .font(.headline)
-                .accessibilityIdentifier("projectDoctorPanel")
         }
-        .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay(alignment: .top) { Divider() }
+        .overlay(alignment: .bottom) { Divider() }
+        .onChange(of: disclosureObservation, initial: true) { _, observation in
+            disclosure.observe(observation)
+        }
+    }
+
+    private var expansionBinding: Binding<Bool> {
+        Binding(
+            get: { disclosure.isExpanded },
+            set: { disclosure.setExpanded($0) }
+        )
+    }
+
+    private var disclosureObservation: DoctorDisclosureObservation {
+        var failureIDs = Set(
+            diagnosis.checks
+                .filter { $0.status == .fail }
+                .map { "check:\($0.id.rawValue)" }
+        )
+        for validation in diagnosis.validation.errors {
+            failureIDs.insert("validation:\(validation.field.rawValue):\(validation.code)")
+        }
+        return DoctorDisclosureObservation(
+            isSettled: diagnosis.hasConfigurationCheck && diagnosis.status != .checking,
+            failureIDs: failureIDs
+        )
+    }
+
+    private var compactSummary: String {
+        let passes = diagnosis.checks.count { $0.status == .pass }
+        let warnings = diagnosis.checks.count { $0.status == .warn }
+        let failures = diagnosis.checks.count { $0.status == .fail }
+
+        return switch diagnosis.status {
+        case .idle: diagnosis.hasConfigurationCheck
+            ? "Ready to start · \(passes) \(passes == 1 ? "check" : "checks") passed"
+            : "Not checked"
+        case .checking: "Checking…"
+        case .starting: "Starting…"
+        case .waiting: "Waiting for readiness…"
+        case .ready: "Ready · \(passes) \(passes == 1 ? "check" : "checks") passed"
+        case .attention: warnings == 0
+            ? "Attention"
+            : "Attention · \(warnings) \(warnings == 1 ? "warning" : "warnings")"
+        case .failed: failures == 0
+            ? "Blocked"
+            : "Blocked · \(failures) \(failures == 1 ? "check" : "checks") failed"
+        case .stopped: passes == 0
+            ? "Stopped"
+            : "Stopped · \(passes) \(passes == 1 ? "check" : "checks") passed"
+        }
     }
 
     @ViewBuilder
@@ -86,7 +144,19 @@ struct DoctorPanelView: View {
         case .failed: "xmark.octagon.fill"
         case .attention: "exclamationmark.triangle.fill"
         case .ready: "checkmark.circle.fill"
+        case .idle where diagnosis.hasConfigurationCheck: "checkmark.circle.fill"
         default: "stethoscope"
+        }
+    }
+
+    private var panelColor: Color {
+        switch diagnosis.status {
+        case .failed: .red
+        case .attention: .orange
+        case .ready: .green
+        case .idle where diagnosis.hasConfigurationCheck: .green
+        case .checking, .starting, .waiting: .blue
+        case .idle, .stopped: .secondary
         }
     }
 

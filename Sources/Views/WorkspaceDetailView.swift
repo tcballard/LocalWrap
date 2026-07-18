@@ -80,6 +80,7 @@ struct WorkspaceDetailView: View {
                     WorkspaceDoctorPanelView(diagnosis: diagnosis) { id in
                         selection = .project(id)
                     }
+                    .id(WorkspaceDoctorSessionID(diagnosis.target))
                 }
                 if let operation = appModel.workspaceOperation {
                     WorkspaceOperationResultsView(summary: operation)
@@ -193,4 +194,16 @@ struct WorkspaceDetailView: View {
 
 extension ReviewedWorkspacePack: Identifiable {
     var id: String { packURL.path }
+}
+
+private struct WorkspaceDoctorSessionID: Hashable {
+    let kind: String
+    let profileID: String?
+    let projectIDs: [String]
+
+    init(_ target: ResolvedWorkspaceTarget) {
+        kind = target.kind.rawValue
+        profileID = target.profileID
+        projectIDs = target.projectIDs
+    }
 }

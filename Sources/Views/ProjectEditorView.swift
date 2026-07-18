@@ -102,6 +102,7 @@ struct ProjectEditorView: View {
                 actionsDisabled: project != nil && (isDirty || runtime.status.isActive),
                 perform: performDoctorAction
             )
+            .id(project?.id ?? "new-project")
         }
         .frame(maxWidth: 760, alignment: .leading)
         .task(id: diagnosisKey) {
