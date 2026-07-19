@@ -564,7 +564,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.errorMessage, DoctorError.dirtyProject.localizedDescription)
     }
 
-    func testFinderAndPasteboardDoctorActionsUseInjectedDesktopService() async throws {
+    func testFinderAndPreviewedDoctorReportUseInjectedDesktopService() async throws {
         let fixture = try makeFixture(name: "DesktopActions")
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let recorder = DesktopRecorder()
@@ -590,7 +590,7 @@ final class AppModelTests: XCTestCase {
             isDirty: false,
             diagnosis: diagnosis
         )
-        _ = await model.performDoctorAction(
+        let directCopy = await model.performDoctorAction(
             .copyReport,
             draft: draft,
             existingID: nil,
@@ -599,7 +599,25 @@ final class AppModelTests: XCTestCase {
         )
 
         XCTAssertEqual(recorder.folder?.path, fixture.projectDirectory.path)
-        XCTAssertTrue(recorder.text?.contains("LocalWrap Doctor Report") == true)
+        XCTAssertNil(directCopy)
+        XCTAssertNil(recorder.text)
+        XCTAssertEqual(
+            model.errorMessage,
+            DoctorError.reportPreviewRequired.localizedDescription
+        )
+
+        let report = model.buildDoctorReport(
+            draft: draft,
+            existingID: nil,
+            diagnosis: diagnosis
+        )
+        XCTAssertEqual(report.previewText, report.copyText)
+        XCTAssertNil(recorder.text)
+
+        model.copyDoctorReport(report)
+
+        XCTAssertEqual(recorder.text, report.previewText)
+        XCTAssertTrue(report.previewText.contains("LocalWrap Redacted Doctor Report"))
     }
 
     func testActiveProjectRejectsProtectedConfigurationMutation() async throws {

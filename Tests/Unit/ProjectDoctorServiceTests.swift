@@ -115,7 +115,7 @@ final class ProjectDoctorServiceTests: XCTestCase {
         }
     }
 
-    func testTimelineAndReportBoundsAreElectronCompatible() throws {
+    func testTimelineBoundsAndDoctorReportOmitsRuntimeLogs() throws {
         var diagnosis = ProjectDiagnosis.notChecked(now: "0")
         for index in 0..<30 {
             diagnosis.addTimeline("event-\(index)", status: .info, at: "\(index)")
@@ -126,9 +126,10 @@ final class ProjectDoctorServiceTests: XCTestCase {
 
         XCTAssertEqual(diagnosis.timeline.count, 25)
         XCTAssertEqual(diagnosis.timeline.first?.message, "event-5")
-        XCTAssertFalse(report.contains("log-9\n"))
-        XCTAssertTrue(report.contains("log-10"))
-        XCTAssertTrue(report.contains("log-29"))
+        XCTAssertTrue(report.hasPrefix("LocalWrap Redacted Doctor Report"))
+        XCTAssertFalse(report.contains("log-9"))
+        XCTAssertFalse(report.contains("log-10"))
+        XCTAssertFalse(report.contains("log-29"))
     }
 
     private func draft() -> ProjectDraft {

@@ -132,14 +132,46 @@ struct WorkspaceOperationResult: Identifiable, Equatable, Sendable {
     let blockedByProjectIDs: [String]
     let blockedByProjectNames: [String]
     var id: String { projectID }
+
+    var requiresAttention: Bool {
+        switch (status, reason) {
+        case (.failed, _), (.blocked, _), (.skipped, "dependency-not-ready"):
+            true
+        case (.started, _), (.skipped, _):
+            false
+        }
+    }
 }
 
 struct WorkspaceOperationSummary: Equatable, Sendable {
+    let target: WorkspaceTarget?
     let results: [WorkspaceOperationResult]
+
+    init(results: [WorkspaceOperationResult], target: WorkspaceTarget? = nil) {
+        self.target = target
+        self.results = results
+    }
+
     var started: Int { results.count { $0.status == .started } }
     var failed: Int { results.count { $0.status == .failed } }
     var skipped: Int { results.count { $0.status == .skipped } }
     var blocked: Int { results.count { $0.status == .blocked } }
+
+    var unresolvedResults: [WorkspaceOperationResult] {
+        results.filter(\.requiresAttention)
+    }
+
+    func bound(to target: WorkspaceTarget) -> WorkspaceOperationSummary {
+        WorkspaceOperationSummary(results: results, target: target)
+    }
+
+    func resolvingAttention(for projectID: String) -> WorkspaceOperationSummary? {
+        let remaining = results.filter {
+            $0.projectID != projectID || !$0.requiresAttention
+        }
+        guard !remaining.isEmpty else { return nil }
+        return WorkspaceOperationSummary(results: remaining, target: target)
+    }
 }
 
 struct WorkspacePackV1: Codable, Equatable, Sendable {

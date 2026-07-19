@@ -2,12 +2,15 @@ import SwiftUI
 
 struct ProjectCockpitView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let projectID: String
     @Binding var selection: AppSelection?
     @State private var editorIsDirty = false
     @State private var previewState = PreviewState()
     @State private var previewViewport: PreviewViewportPreset = .fit
     @State private var confirmsDeletion = false
+    @State private var scrollRequest: ProjectScrollRequest?
+    @State private var editorAttentionRequest: AttentionNavigationRequest?
 
     var body: some View {
         if let project = appModel.project(id: projectID) {
@@ -106,26 +109,58 @@ struct ProjectCockpitView: View {
                 }
                 previewState.open(url)
             }
-            .onDisappear { previewState.close() }
+            .onChange(of: previewState.attentionFailureEvidence) { _, _ in
+                appModel.reportPreviewState(projectID: projectID, state: previewState)
+            }
+            .task(id: appModel.navigationRouter.attentionRequest?.id) {
+                handleAttentionRequest()
+            }
         } else {
             ContentUnavailableView("Project Not Found", systemImage: "questionmark.folder")
         }
     }
 
     private func projectContent(project: Project, runtime: RuntimeSnapshot) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header(project: project, runtime: runtime)
-                ProjectEditorView(
-                    project: project,
-                    runtime: runtime,
-                    selection: $selection,
-                    isDirty: $editorIsDirty
-                )
-                .frame(minHeight: 430)
-                logPanel(runtime: runtime)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    header(project: project, runtime: runtime)
+                    ProjectEditorView(
+                        project: project,
+                        runtime: runtime,
+                        attentionRequest: editorAttentionRequest,
+                        selection: $selection,
+                        isDirty: $editorIsDirty
+                    )
+                    .frame(minHeight: 430)
+                    logPanel(runtime: runtime)
+                        .id("projectRuntimeSurface")
+                }
+                .padding(24)
             }
-            .padding(24)
+            .onChange(of: scrollRequest) { _, request in
+                guard let request else { return }
+                let destination: String
+                let anchor: UnitPoint
+                switch request.target {
+                case .field(let field):
+                    destination = "projectField-\(field.rawValue)"
+                    anchor = .center
+                case .doctor:
+                    destination = "projectDoctorSurface"
+                    anchor = .center
+                case .runtime:
+                    destination = "projectRuntimeSurface"
+                    anchor = .top
+                }
+                if reduceMotion {
+                    proxy.scrollTo(destination, anchor: anchor)
+                } else {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo(destination, anchor: anchor)
+                    }
+                }
+            }
         }
     }
 
@@ -242,6 +277,34 @@ struct ProjectCockpitView: View {
         previewState.open(url)
     }
 
+    private func handleAttentionRequest() {
+        guard let request = appModel.navigationRouter.attentionRequest,
+              case .project(let requestedProjectID, let surface) = request.target,
+              requestedProjectID == projectID else { return }
+
+        switch surface {
+        case .preview:
+            if let project = appModel.project(id: projectID),
+               appModel.runtime(for: projectID).status == .ready,
+               !editorIsDirty,
+               let url = LocalURLValidator().url(from: project.url) {
+                previewState.open(url)
+            }
+        case .runtime:
+            scrollRequest = ProjectScrollRequest(id: request.id, target: .runtime)
+        case .field(let field):
+            editorAttentionRequest = request
+            scrollRequest = ProjectScrollRequest(
+                id: request.id,
+                target: field == .dependencies ? .doctor : .field(field)
+            )
+        case .doctor:
+            editorAttentionRequest = request
+            scrollRequest = ProjectScrollRequest(id: request.id, target: .doctor)
+        }
+        appModel.navigationRouter.consumeAttentionRequest(id: request.id)
+    }
+
     private func canRestart(_ status: RuntimeStatus) -> Bool {
         status != .starting && status != .stopping
     }
@@ -249,4 +312,15 @@ struct ProjectCockpitView: View {
     private func canSignal(_ runtime: RuntimeSnapshot) -> Bool {
         runtime.ownership == .none || runtime.ownership.permitsSignalling
     }
+}
+
+private struct ProjectScrollRequest: Equatable {
+    let id: UUID
+    let target: ProjectScrollTarget
+}
+
+private enum ProjectScrollTarget: Equatable {
+    case field(ProjectField)
+    case doctor
+    case runtime
 }

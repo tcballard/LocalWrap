@@ -66,6 +66,23 @@ never sends a signal when identity evidence is missing or conflicting. See
 [runtime reconciliation and recovery](Documentation/runtime-reconciliation.md)
 for the persisted fields, recovery behavior, and safety boundary.
 
+## Needs Attention and support reports
+
+**Needs Attention** is one compact recovery inbox for Project Doctor,
+Workspace Doctor, runtime, readiness, workspace-start, and Live Preview
+problems. Repeated observations merge into one causal issue. Selecting its row
+opens the affected field, Doctor check, workspace project, runtime output, or
+preview; configuration-changing fixes remain separate buttons with a
+before-and-after confirmation.
+
+LocalWrap also keeps a private, bounded lifecycle history: coarse states,
+timestamps, exit codes, and fixed LocalWrap lifecycle events only. It never
+records command output, project names, paths, URLs, environment values, request
+bodies, headers, cookies, or credentials. **Preview Support Report** shows the
+exact redacted text before **Copy Report** is enabled. History can be cleared
+for one project or globally. See
+[Needs Attention and diagnostic privacy](Documentation/attention-and-recovery.md).
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements

@@ -15,6 +15,10 @@ final class AppModel {
     private(set) var workspaceOperation: WorkspaceOperationSummary?
     private(set) var runtimeReconciliationReport: RuntimeReconciliationReport
     private(set) var runtimeBootstrapState: RuntimeBootstrapState
+    private(set) var attentionSnapshot: AttentionSnapshot
+    private(set) var previewFailures: [String: PreviewState]
+    private(set) var runHistoryDocument: RunHistoryDocument
+    private(set) var runHistoryErrorMessage: String?
     private(set) var isWorkspaceOperating: Bool
     private(set) var isCheckingForUpdates: Bool
     var releaseNotice: ReleaseNotice?
@@ -36,6 +40,9 @@ final class AppModel {
     private let workspaceDoctor: WorkspaceDoctorService
     private let workspaceOrchestration: WorkspaceOrchestrationService
     private let workspacePacks: WorkspacePackService
+    private let attentionService: AttentionService
+    private let runHistoryCoordinator: RunHistoryCoordinator?
+    private let diagnosticNow: @Sendable () -> String
     private let releaseChecker: ReleaseCheckService
     private let currentVersion: @Sendable () -> String
     private let sampleService: SampleProjectService
@@ -45,7 +52,15 @@ final class AppModel {
     private var openedReadyRunIDs: Set<String>
     private var runtimeBootstrapGeneration = UUID()
     private var runtimeBootstrapTask: Task<Void, Never>?
+    private var attentionRefreshTask: Task<Void, Never>?
+    private var attentionDiagnosisTask: Task<AttentionInput?, Never>?
+    private var attentionRefreshGeneration = UUID()
+    private var attentionRefreshRevision: UInt64 = 0
     private var workspaceOperationGeneration = UUID()
+    private var retainedWorkspaceOperations: [WorkspaceTarget: WorkspaceOperationSummary]
+    private var retainedWorkspaceOperationOrder: [WorkspaceTarget]
+    private var runHistoryCaptures: [String: RunHistoryCapture]
+    private var runHistoryTask: Task<Void, Never>?
     private var isShuttingDown = false
 
     init(
@@ -58,6 +73,9 @@ final class AppModel {
         initialRuntimes: [String: RuntimeSnapshot] = [:],
         runtimeReconciliationReport: RuntimeReconciliationReport = .empty,
         runtimeBootstrapState: RuntimeBootstrapState = .ready,
+        initialAttentionSnapshot: AttentionSnapshot = .empty,
+        initialPreviewFailures: [String: PreviewState] = [:],
+        initialRunHistoryDocument: RunHistoryDocument = .empty,
         store: ProjectStore? = nil,
         runtimeService: RuntimeService = RuntimeService(),
         doctorService: ProjectDoctorService = ProjectDoctorService(),
@@ -66,6 +84,11 @@ final class AppModel {
         workspaceDoctor: WorkspaceDoctorService = WorkspaceDoctorService(),
         workspaceOrchestration: WorkspaceOrchestrationService? = nil,
         workspacePacks: WorkspacePackService = WorkspacePackService(),
+        attentionService: AttentionService = AttentionService(),
+        runHistoryCoordinator: RunHistoryCoordinator? = nil,
+        diagnosticNow: @escaping @Sendable () -> String = {
+            ISO8601DateFormatter().string(from: Date())
+        },
         releaseChecker: ReleaseCheckService = ReleaseCheckService(),
         currentVersion: @escaping @Sendable () -> String = {
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -97,6 +120,10 @@ final class AppModel {
         workspaceOperation = nil
         self.runtimeReconciliationReport = runtimeReconciliationReport
         self.runtimeBootstrapState = runtimeBootstrapState
+        attentionSnapshot = initialAttentionSnapshot
+        previewFailures = initialPreviewFailures
+        runHistoryDocument = initialRunHistoryDocument
+        runHistoryErrorMessage = nil
         isWorkspaceOperating = false
         isCheckingForUpdates = false
         releaseNotice = nil
@@ -110,6 +137,9 @@ final class AppModel {
         self.workspaceOrchestration = workspaceOrchestration
             ?? WorkspaceOrchestrationService(runtime: runtimeService, doctor: workspaceDoctor)
         self.workspacePacks = workspacePacks
+        self.attentionService = attentionService
+        self.runHistoryCoordinator = runHistoryCoordinator
+        self.diagnosticNow = diagnosticNow
         self.releaseChecker = releaseChecker
         self.currentVersion = currentVersion
         self.sampleService = sampleService
@@ -124,6 +154,11 @@ final class AppModel {
             workspace: workspace
         )
         openedReadyRunIDs = []
+        retainedWorkspaceOperations = [:]
+        retainedWorkspaceOperationOrder = []
+        runHistoryCaptures = [:]
+        scheduleAttentionRefresh(immediate: true)
+        scheduleRunHistoryLoad()
     }
 
     static func live(
@@ -135,6 +170,8 @@ final class AppModel {
         workspaceDoctor: WorkspaceDoctorService = WorkspaceDoctorService(),
         workspaceOrchestration: WorkspaceOrchestrationService? = nil,
         workspacePacks: WorkspacePackService = WorkspacePackService(),
+        attentionService: AttentionService = AttentionService(),
+        runHistoryCoordinator: RunHistoryCoordinator? = nil,
         sessionStore: SessionStateStore = SessionStateStore(),
         releaseChecker: ReleaseCheckService = ReleaseCheckService(),
         currentVersion: @escaping @Sendable () -> String = {
@@ -157,6 +194,8 @@ final class AppModel {
                 workspaceDoctor: workspaceDoctor,
                 workspaceOrchestration: workspaceOrchestration,
                 workspacePacks: workspacePacks,
+                attentionService: attentionService,
+                runHistoryCoordinator: runHistoryCoordinator,
                 releaseChecker: releaseChecker,
                 currentVersion: currentVersion,
                 navigationRouter: NavigationRouter(
@@ -182,6 +221,8 @@ final class AppModel {
                 workspaceDoctor: workspaceDoctor,
                 workspaceOrchestration: workspaceOrchestration,
                 workspacePacks: workspacePacks,
+                attentionService: attentionService,
+                runHistoryCoordinator: runHistoryCoordinator,
                 releaseChecker: releaseChecker,
                 currentVersion: currentVersion
             )
@@ -441,7 +482,10 @@ final class AppModel {
             )
         }
         #endif
-        return live(runtimeService: .live())
+        return live(
+            runtimeService: .live(),
+            runHistoryCoordinator: RunHistoryCoordinator()
+        )
     }
 
     var menuStatusSummary: String {
@@ -451,6 +495,8 @@ final class AppModel {
     var runtimeControlsAvailable: Bool {
         runtimeBootstrapState.permitsMutation && !isShuttingDown
     }
+
+    var attentionCount: Int { attentionSnapshot.count }
 
     var readyProjects: [Project] {
         projects.filter { runtime(for: $0.id).status == .ready }
@@ -492,6 +538,145 @@ final class AppModel {
 
     func diagnose(_ draft: ProjectDraft) -> ProjectDiagnosis {
         doctorService.diagnose(draft)
+    }
+
+    func reportPreviewState(projectID: String, state: PreviewState) {
+        if state.status == .failed {
+            let previousIdentity = previewFailures[projectID]?.attentionFailureEvidence
+            let nextIdentity = state.attentionFailureEvidence
+            guard previousIdentity != nextIdentity else { return }
+            previewFailures[projectID] = state
+            scheduleAttentionRefresh()
+        } else if previewFailures.removeValue(forKey: projectID) != nil {
+            scheduleAttentionRefresh()
+        }
+    }
+
+    func openAttentionIssue(_ issue: AttentionIssue) {
+        navigationRouter.showAttentionTarget(issue.navigationTarget)
+    }
+
+    func performAttentionAction(
+        _ issue: AttentionIssue,
+        confirmed: Bool = false
+    ) async {
+        var actionableIssue = issue
+        let mutatesSavedConfiguration: Bool
+        if case .doctor(let action) = issue.nextAction.kind {
+            mutatesSavedConfiguration = action.mutatesProject
+        } else {
+            mutatesSavedConfiguration = false
+        }
+
+        if issue.nextAction.requiresConfirmation || mutatesSavedConfiguration {
+            guard confirmed else {
+                errorMessage = "Confirm this saved configuration change before applying it."
+                return
+            }
+            guard let currentIssue = attentionSnapshot.issues.first(where: { $0.id == issue.id }),
+                  currentIssue.nextAction == issue.nextAction,
+                  currentIssue.navigationTarget == issue.navigationTarget else {
+                errorMessage = "This issue changed before the fix was applied. Review its current state and try again."
+                scheduleAttentionRefresh(immediate: true)
+                return
+            }
+            actionableIssue = currentIssue
+        }
+
+        switch actionableIssue.nextAction.kind {
+        case .navigate, .retryPreview:
+            navigationRouter.showAttentionTarget(actionableIssue.navigationTarget)
+
+        case .reconcileRuntime:
+            await reconcileRuntimeOwnership()
+            navigationRouter.showAttentionTarget(actionableIssue.navigationTarget)
+
+        case .doctor(let action):
+            guard case .project(let projectID, let surface) = actionableIssue.navigationTarget,
+                  let project = project(id: projectID) else {
+                navigationRouter.showAttentionTarget(actionableIssue.navigationTarget)
+                return
+            }
+            let draft = ProjectDraft(project: project)
+            let diagnosis = doctorService.diagnose(draft)
+            if action.mutatesProject {
+                guard case .doctor(let check, _) = surface,
+                      diagnosis.check(check).actions.contains(action) else {
+                    errorMessage = "This saved configuration fix is no longer needed. Review the current Doctor result."
+                    scheduleAttentionRefresh(immediate: true)
+                    return
+                }
+            }
+            _ = await performDoctorAction(
+                action,
+                draft: draft,
+                existingID: projectID,
+                isDirty: false,
+                diagnosis: diagnosis
+            )
+            navigationRouter.showAttentionTarget(actionableIssue.navigationTarget)
+            scheduleAttentionRefresh(immediate: true)
+        }
+    }
+
+    func clearAttentionHistory() async {
+        attentionSnapshot = await attentionService.clearHistory()
+    }
+
+    func buildSupportReport() async -> SupportReport? {
+        guard let runHistoryCoordinator else { return nil }
+        await runHistoryTask?.value
+        do {
+            let report = try await runHistoryCoordinator.supportReport(
+                generatedAt: diagnosticNow()
+            )
+            runHistoryErrorMessage = nil
+            return report
+        } catch {
+            runHistoryErrorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    func copySupportReport(_ report: SupportReport) {
+        desktopActions.copyText(report.copyText)
+    }
+
+    func buildDoctorReport(
+        draft: ProjectDraft,
+        existingID: String?,
+        diagnosis: ProjectDiagnosis
+    ) -> DoctorReport {
+        let runtime = existingID.map { self.runtime(for: $0) } ?? RuntimeSnapshot()
+        let reportProject = existingID
+            .flatMap { project(id: $0) }
+            .map(ProjectDraft.init(project:)) ?? draft
+        return reportBuilder.report(
+            project: reportProject,
+            runtime: runtime,
+            diagnosis: diagnosis
+        )
+    }
+
+    func copyDoctorReport(_ report: DoctorReport) {
+        desktopActions.copyText(report.copyText)
+    }
+
+    func clearRunHistory(projectID: String? = nil) async {
+        guard let runHistoryCoordinator else { return }
+        await runHistoryTask?.value
+        do {
+            if let projectID {
+                runHistoryDocument = try await runHistoryCoordinator.clear(projectID: projectID)
+                runHistoryCaptures[projectID] = nil
+            } else {
+                runHistoryDocument = try await runHistoryCoordinator.clearAll()
+                runHistoryCaptures = [:]
+            }
+            runHistoryErrorMessage = nil
+        } catch {
+            runHistoryErrorMessage = error.localizedDescription
+        }
     }
 
     @discardableResult
@@ -560,16 +745,7 @@ final class AppModel {
                 desktopActions.revealFolder(URL(fileURLWithPath: draft.cwd, isDirectory: true))
                 return draft
             case .copyReport:
-                let runtime = existingID.map { self.runtime(for: $0) } ?? RuntimeSnapshot()
-                let reportProject = existingID
-                    .flatMap { project(id: $0) }
-                    .map(ProjectDraft.init(project:)) ?? draft
-                desktopActions.copyText(reportBuilder.build(
-                    project: reportProject,
-                    runtime: runtime,
-                    diagnosis: diagnosis
-                ))
-                return draft
+                throw DoctorError.reportPreviewRequired
             case .revealCommand:
                 return draft
             case .findFreePort, .syncURL:
@@ -750,6 +926,7 @@ final class AppModel {
                 target: target,
                 runtimes: runtimes
             )
+            scheduleAttentionRefresh()
             errorMessage = nil
         } catch {
             errorMessage = error.localizedDescription
@@ -780,7 +957,9 @@ final class AppModel {
             )
             guard workspaceOperationGeneration == generation else { return }
             workspaceDiagnosis = diagnosis
-            workspaceOperation = operation
+            let operationTarget = target ?? .allProjects
+            workspaceOperation = operation.bound(to: operationTarget)
+            retainWorkspaceOperation(operation, target: operationTarget)
             if let profileID = diagnosis.target.profileID {
                 _ = try store?.markWorkspaceStarted(id: profileID)
             }
@@ -788,6 +967,7 @@ final class AppModel {
                 .filter { $0.status == .started || $0.reason == "already-active" }
                 .map(\.projectID))
             try reloadPersistence()
+            scheduleAttentionRefresh(immediate: true)
             errorMessage = nil
         } catch {
             guard workspaceOperationGeneration == generation else { return }
@@ -809,6 +989,7 @@ final class AppModel {
         guard workspaceOperationGeneration == generation else { return }
         isWorkspaceOperating = false
         workspaceOperation = nil
+        scheduleAttentionRefresh(immediate: true)
     }
 
     @discardableResult
@@ -843,6 +1024,7 @@ final class AppModel {
                 target: selectedWorkspaceTarget,
                 runtimes: runtimes
             )
+            scheduleAttentionRefresh()
             repositoryOpenProposal = nil
             errorMessage = nil
             return true
@@ -919,8 +1101,17 @@ final class AppModel {
         runtimeBootstrapGeneration = UUID()
         runtimeBootstrapTask?.cancel()
         runtimeBootstrapTask = nil
+        attentionRefreshGeneration = UUID()
+        let pendingAttentionRefresh = attentionRefreshTask
+        let pendingAttentionDiagnosis = attentionDiagnosisTask
+        pendingAttentionRefresh?.cancel()
+        pendingAttentionDiagnosis?.cancel()
+        attentionRefreshTask = nil
+        attentionDiagnosisTask = nil
         workspaceOperationGeneration = UUID()
         isWorkspaceOperating = false
+        await pendingAttentionRefresh?.value
+        _ = await pendingAttentionDiagnosis?.value
         try? captureActiveProjectIDs()
         await workspaceOrchestration.cancelCurrentOperation()
         if runtimeService.managesPersistentRuns, !runtimeBootstrapState.permitsMutation {
@@ -930,7 +1121,31 @@ final class AppModel {
                 receiveRuntime(projectID: projectID, state: state)
             }
         }
-        return await runtimeService.stopAllWithReport()
+        let report = await runtimeService.stopAllWithReport()
+        await Task.yield()
+        await runHistoryTask?.value
+        return report
+    }
+
+    private func reconcileRuntimeOwnership() async {
+        guard runtimeService.managesPersistentRuns, !isShuttingDown else { return }
+        runtimeBootstrapGeneration = UUID()
+        runtimeBootstrapTask?.cancel()
+        runtimeBootstrapTask = nil
+        runtimeBootstrapState = .reconciling
+        let report = await runtimeService.reconcile(projects: projects)
+        runtimeReconciliationReport = report
+        for (projectID, state) in await runtimeService.allSnapshots() {
+            receiveRuntime(projectID: projectID, state: state)
+        }
+        if let ledgerError = report.ledgerError {
+            runtimeBootstrapState = .blocked(ledgerError)
+            errorMessage = ledgerError
+        } else {
+            runtimeBootstrapState = .ready
+            errorMessage = nil
+        }
+        scheduleAttentionRefresh(immediate: true)
     }
 
     private func reloadPersistence() throws {
@@ -940,7 +1155,11 @@ final class AppModel {
         workspace = document.workspace
         projectCount = projects.count
         workspaceCount = workspace.savedWorkspaces.count
+        let projectIDs = Set(projects.map(\.id))
+        previewFailures = previewFailures.filter { projectIDs.contains($0.key) }
+        pruneRetainedWorkspaceOperations(projectIDs: projectIDs)
         navigationRouter.revalidate(projects: projects, workspace: workspace)
+        scheduleAttentionRefresh()
     }
 
     private func openValidatedLocalURL(_ value: String) {
@@ -965,6 +1184,7 @@ final class AppModel {
         let previousStatus = previous?.status ?? .stopped
         runtimes[projectID] = state
         runningProjectCount = runtimes.values.count { $0.status.isActive }
+        captureRunHistory(projectID: projectID, previous: previous, current: state)
         if state.status == .ready,
            previousStatus != .ready,
            !state.recoveredAfterRelaunch,
@@ -977,6 +1197,22 @@ final class AppModel {
             if let runID = state.runID ?? previous?.runID {
                 openedReadyRunIDs.remove(runID)
             }
+        }
+        let clearedPreviewFailure = state.status != .ready
+            && previewFailures.removeValue(forKey: projectID) != nil
+        let resolvedWorkspaceFailure: Bool
+        if state.status == .ready || state.terminalReason == .intentionalStop {
+            resolvedWorkspaceFailure = resolveRetainedWorkspaceOperations(projectID: projectID)
+            if let operation = workspaceOperation {
+                workspaceOperation = operation.resolvingAttention(for: projectID)
+            }
+        } else {
+            resolvedWorkspaceFailure = false
+        }
+        if runtimeAttentionChanged(from: previous, to: state)
+            || clearedPreviewFailure
+            || resolvedWorkspaceFailure {
+            scheduleAttentionRefresh()
         }
     }
 
@@ -1001,6 +1237,7 @@ final class AppModel {
                 model.receiveRuntime(projectID: projectID, state: state)
             }
             model.runtimeReconciliationReport = report
+            model.scheduleAttentionRefresh(immediate: true)
             if let ledgerError = report.ledgerError {
                 model.runtimeBootstrapState = .blocked(ledgerError)
                 model.errorMessage = ledgerError
@@ -1053,13 +1290,387 @@ final class AppModel {
                   runtimeBootstrapGeneration == bootstrapGeneration,
                   !isShuttingDown else { return }
             workspaceDiagnosis = diagnosis
-            workspaceOperation = operation
+            workspaceOperation = operation.bound(to: .allProjects)
+            retainWorkspaceOperation(operation, target: .allProjects)
+            scheduleAttentionRefresh()
         } catch {
             guard workspaceOperationGeneration == operationGeneration,
                   runtimeBootstrapGeneration == bootstrapGeneration,
                   !isShuttingDown else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func scheduleRunHistoryLoad() {
+        guard let runHistoryCoordinator else { return }
+        let previousTask = runHistoryTask
+        runHistoryTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            do {
+                let document = try await runHistoryCoordinator.load()
+                guard let self else { return }
+                self.runHistoryDocument = document
+                self.runHistoryErrorMessage = nil
+            } catch {
+                self?.runHistoryErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func captureRunHistory(
+        projectID: String,
+        previous: RuntimeSnapshot?,
+        current: RuntimeSnapshot
+    ) {
+        guard runHistoryCoordinator != nil else { return }
+        let existing = runHistoryCaptures[projectID]
+        let hasRunEvidence = current.runID != nil
+            || current.startedAt != nil
+            || current.terminalReason != nil
+            || current.status != .stopped
+            || previous?.status.isActive == true
+        guard hasRunEvidence else { return }
+
+        let timestamp = runHistoryTimestamp(for: current)
+        let runID = current.runID
+            ?? previous?.runID
+            ?? existing?.runID
+            ?? "session:\(projectID):\(current.startedAt ?? timestamp)"
+        var capture = existing?.runID == runID
+            ? existing!
+            : RunHistoryCapture(
+                runID: runID,
+                projectID: projectID,
+                startedAt: current.startedAt ?? timestamp,
+                endedAt: nil,
+                finalState: runHistoryState(for: current),
+                exitCode: nil,
+                transitions: [],
+                lifecycleExcerpt: []
+            )
+        let before = capture
+        let state = runHistoryState(for: current)
+        if capture.transitions.last?.state != state {
+            capture.transitions.append(RunHistoryTransitionInput(at: timestamp, state: state))
+            capture.transitions = Array(capture.transitions.suffix(
+                RunHistoryRecord.maximumTransitions
+            ))
+        }
+        for event in runHistoryLifecycleEvents(from: previous, to: current) {
+            guard capture.lifecycleExcerpt.last?.event != event else { continue }
+            capture.lifecycleExcerpt.append(RunHistoryLifecycleInput(at: timestamp, event: event))
+        }
+        capture.lifecycleExcerpt = Array(capture.lifecycleExcerpt.suffix(
+            RunHistoryRecord.maximumLifecycleEntries
+        ))
+        capture.finalState = state
+        capture.exitCode = current.exitCode
+        if !current.status.isActive {
+            capture.endedAt = current.stoppedAt ?? timestamp
+        }
+
+        runHistoryCaptures[projectID] = capture
+        guard capture != before else { return }
+        enqueueRunHistory(capture.draft)
+    }
+
+    private func enqueueRunHistory(_ draft: RunHistoryDraft) {
+        guard let runHistoryCoordinator else { return }
+        let previousTask = runHistoryTask
+        runHistoryTask = Task { @MainActor [weak self] in
+            await previousTask?.value
+            do {
+                let document = try await runHistoryCoordinator.record(draft)
+                guard let self else { return }
+                self.runHistoryDocument = document
+                self.runHistoryErrorMessage = nil
+            } catch {
+                self?.runHistoryErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func runHistoryTimestamp(for snapshot: RuntimeSnapshot) -> String {
+        switch snapshot.status {
+        case .ready:
+            snapshot.readyAt ?? snapshot.startedAt ?? diagnosticNow()
+        case .stopped, .failed:
+            snapshot.stoppedAt ?? snapshot.readyAt ?? snapshot.startedAt ?? diagnosticNow()
+        case .starting, .runningUnresponsive, .stopping:
+            snapshot.startedAt ?? diagnosticNow()
+        }
+    }
+
+    private func runHistoryState(for snapshot: RuntimeSnapshot) -> RunHistoryState {
+        switch snapshot.ownership {
+        case .conflicting:
+            return .ownershipConflict
+        case .unverifiable:
+            return .ownershipUnverifiable
+        case .none, .reconciling, .verified:
+            break
+        }
+        if case .unexpectedExit = snapshot.terminalReason { return .exited }
+        return switch snapshot.status {
+        case .stopped: .stopped
+        case .starting: .starting
+        case .ready: .ready
+        case .runningUnresponsive: .unresponsive
+        case .stopping: .stopping
+        case .failed: .failed
+        }
+    }
+
+    private func runHistoryLifecycleEvents(
+        from previous: RuntimeSnapshot?,
+        to current: RuntimeSnapshot
+    ) -> [RunHistoryLifecycleEvent] {
+        var events: [RunHistoryLifecycleEvent] = []
+        if previous == nil, current.recoveredAfterRelaunch {
+            events.append(.reconciliationRecovered)
+        }
+        if previous?.ownership != current.ownership {
+            switch current.ownership {
+            case .reconciling:
+                events.append(.reconciliationStarted)
+            case .verified where current.recoveredAfterRelaunch:
+                events.append(.reconciliationRecovered)
+            case .unverifiable, .conflicting:
+                events.append(.reconciliationBlocked)
+            case .none, .verified:
+                break
+            }
+        }
+        if previous?.status != current.status {
+            switch current.status {
+            case .starting:
+                events.append(.launchRequested)
+            case .ready:
+                events.append(.readinessPassed)
+            case .stopping:
+                events.append(.stopRequested)
+            case .stopped, .failed, .runningUnresponsive:
+                break
+            }
+        }
+        if current.pid != nil, previous?.pid != current.pid {
+            events.append(.processStarted)
+        }
+        if previous?.terminalReason != current.terminalReason {
+            switch current.terminalReason {
+            case .readinessTimeout:
+                events.append(.readinessTimedOut)
+            case .launchFailure, .doctorBlocked:
+                events.append(.launchFailed)
+            case .unexpectedExit, .intentionalStop, .cleanupFailure:
+                events.append(.processExited)
+            case .ownershipConflict, .ownershipUnverifiable:
+                events.append(.reconciliationBlocked)
+            case nil:
+                break
+            }
+        }
+        var seen = Set<RunHistoryLifecycleEvent>()
+        return events.filter { seen.insert($0).inserted }
+    }
+
+    private func retainWorkspaceOperation(
+        _ operation: WorkspaceOperationSummary,
+        target: WorkspaceTarget
+    ) {
+        var unresolvedByProject = Dictionary(uniqueKeysWithValues:
+            (retainedWorkspaceOperations[target]?.unresolvedResults ?? [])
+                .map { ($0.projectID, $0) }
+        )
+        for result in operation.results {
+            if result.requiresAttention {
+                unresolvedByProject[result.projectID] = result
+            } else {
+                unresolvedByProject[result.projectID] = nil
+            }
+        }
+
+        let bounded = Array(unresolvedByProject.values
+            .sorted { $0.projectID < $1.projectID }
+            .prefix(32))
+        retainedWorkspaceOperationOrder.removeAll { $0 == target }
+        if bounded.isEmpty {
+            retainedWorkspaceOperations[target] = nil
+            return
+        }
+
+        retainedWorkspaceOperations[target] = WorkspaceOperationSummary(
+            results: bounded,
+            target: target
+        )
+        retainedWorkspaceOperationOrder.append(target)
+        while retainedWorkspaceOperationOrder.count > 8 {
+            let removed = retainedWorkspaceOperationOrder.removeFirst()
+            retainedWorkspaceOperations[removed] = nil
+        }
+    }
+
+    private func resolveRetainedWorkspaceOperations(projectID: String) -> Bool {
+        var changed = false
+        for target in retainedWorkspaceOperationOrder {
+            guard let operation = retainedWorkspaceOperations[target],
+                  operation.unresolvedResults.contains(where: { $0.projectID == projectID }) else {
+                continue
+            }
+            retainedWorkspaceOperations[target] = operation.resolvingAttention(for: projectID)
+            changed = true
+        }
+        retainedWorkspaceOperationOrder.removeAll {
+            retainedWorkspaceOperations[$0] == nil
+        }
+        return changed
+    }
+
+    private func pruneRetainedWorkspaceOperations(projectIDs: Set<String>) {
+        let profileIDs = Set(workspace.savedWorkspaces.map(\.id))
+        for target in retainedWorkspaceOperationOrder {
+            if case .profile(let profileID) = target, !profileIDs.contains(profileID) {
+                retainedWorkspaceOperations[target] = nil
+                continue
+            }
+            guard let operation = retainedWorkspaceOperations[target] else { continue }
+            let remaining = operation.unresolvedResults.filter {
+                projectIDs.contains($0.projectID)
+            }
+            retainedWorkspaceOperations[target] = remaining.isEmpty
+                ? nil
+                : WorkspaceOperationSummary(results: remaining, target: target)
+        }
+        retainedWorkspaceOperationOrder.removeAll {
+            retainedWorkspaceOperations[$0] == nil
+        }
+    }
+
+    private func scheduleAttentionRefresh(immediate: Bool = false) {
+        guard !isShuttingDown else { return }
+        let previousRefreshTask = attentionRefreshTask
+        let previousDiagnosisTask = attentionDiagnosisTask
+        previousRefreshTask?.cancel()
+        previousDiagnosisTask?.cancel()
+        attentionDiagnosisTask = nil
+        let generation = UUID()
+        attentionRefreshGeneration = generation
+        attentionRefreshRevision &+= 1
+        let revision = attentionRefreshRevision
+
+        let projectsSnapshot = projects
+        let runtimesSnapshot = runtimes
+        let workspaceSnapshot = workspace
+        let previewSnapshot = previewFailures
+        let reconciliationSnapshot = runtimeReconciliationReport
+        let operationSnapshots = retainedWorkspaceOperationOrder.compactMap {
+            retainedWorkspaceOperations[$0]
+        }
+        let doctor = doctorService
+        let workspaceDoctor = workspaceDoctor
+        let service = attentionService
+
+        attentionRefreshTask = Task { @MainActor [weak self] in
+            // A cancelled detached diagnosis cannot be force-stopped while it is
+            // inside a synchronous filesystem check. Wait for it to observe
+            // cancellation before starting the replacement so batches never
+            // overlap and rapid state changes coalesce deterministically.
+            if let previousRefreshTask {
+                await previousRefreshTask.value
+            }
+            guard !Task.isCancelled,
+                  let self,
+                  self.attentionRefreshGeneration == generation,
+                  !self.isShuttingDown else { return }
+
+            if !immediate {
+                do {
+                    try await Task.sleep(for: .milliseconds(40))
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled,
+                  self.attentionRefreshGeneration == generation,
+                  !self.isShuttingDown else { return }
+
+            let diagnosisTask = Task.detached(priority: .utility) { () -> AttentionInput? in
+                guard !Task.isCancelled else { return nil }
+                let knownProjectIDs = Set(projectsSnapshot.map(\.id))
+                let attentionRuntimes = runtimesSnapshot.filter {
+                    knownProjectIDs.contains($0.key) || $0.value.ownership.hasUnresolvedRun
+                }
+                guard !Task.isCancelled else { return nil }
+
+                var diagnoses: [String: ProjectDiagnosis] = [:]
+                diagnoses.reserveCapacity(projectsSnapshot.count)
+                for project in projectsSnapshot {
+                    guard !Task.isCancelled else { return nil }
+                    let runtime = runtimesSnapshot[project.id] ?? RuntimeSnapshot()
+                    let runtimeDiagnosis = runtime.diagnosis
+                    let diagnosis = (runtime.status.isActive || runtime.ownership.hasUnresolvedRun)
+                        && runtimeDiagnosis.hasConfigurationCheck
+                        ? runtimeDiagnosis
+                        : doctor.diagnose(ProjectDraft(project: project))
+                    guard !Task.isCancelled else { return nil }
+                    diagnoses[project.id] = diagnosis
+                }
+
+                guard !Task.isCancelled else { return nil }
+                let workspaceDiagnoses: [WorkspaceDiagnosis]
+                if let diagnosis = try? workspaceDoctor.diagnose(
+                    projects: projectsSnapshot,
+                    workspace: workspaceSnapshot,
+                    target: .allProjects,
+                    runtimes: runtimesSnapshot
+                ) {
+                    workspaceDiagnoses = [diagnosis]
+                } else {
+                    workspaceDiagnoses = []
+                }
+                guard !Task.isCancelled else { return nil }
+
+                return AttentionInput(
+                    projects: projectsSnapshot,
+                    runtimes: attentionRuntimes,
+                    projectDiagnoses: diagnoses,
+                    workspaceDiagnoses: workspaceDiagnoses,
+                    workspaceOperations: operationSnapshots,
+                    previews: previewSnapshot,
+                    runtimeReconciliation: reconciliationSnapshot
+                )
+            }
+            self.attentionDiagnosisTask = diagnosisTask
+            guard let input = await diagnosisTask.value else {
+                if self.attentionRefreshGeneration == generation {
+                    self.attentionDiagnosisTask = nil
+                }
+                return
+            }
+            if self.attentionRefreshGeneration == generation {
+                self.attentionDiagnosisTask = nil
+            }
+
+            guard !Task.isCancelled,
+                  self.attentionRefreshGeneration == generation,
+                  !self.isShuttingDown else { return }
+            let snapshot = await service.update(input, revision: revision)
+            guard !Task.isCancelled,
+                  self.attentionRefreshGeneration == generation,
+                  !self.isShuttingDown else { return }
+            self.attentionSnapshot = snapshot
+        }
+    }
+
+    private func runtimeAttentionChanged(
+        from previous: RuntimeSnapshot?,
+        to current: RuntimeSnapshot
+    ) -> Bool {
+        guard let previous else { return true }
+        return previous.status != current.status
+            || previous.ownership != current.ownership
+            || previous.terminalReason != current.terminalReason
+            || previous.diagnosis != current.diagnosis
     }
 
     private func captureActiveProjectIDs(fallback: [String] = []) throws {
@@ -1084,6 +1695,30 @@ final class AppModel {
         guard runtimeControlsAvailable else {
             throw RuntimeError.reconciliationRequired(runtimeBootstrapMessage)
         }
+    }
+}
+
+private struct RunHistoryCapture: Equatable, Sendable {
+    let runID: String
+    let projectID: String
+    let startedAt: String
+    var endedAt: String?
+    var finalState: RunHistoryState
+    var exitCode: Int32?
+    var transitions: [RunHistoryTransitionInput]
+    var lifecycleExcerpt: [RunHistoryLifecycleInput]
+
+    var draft: RunHistoryDraft {
+        RunHistoryDraft(
+            runID: runID,
+            projectID: projectID,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            finalState: finalState,
+            exitCode: exitCode,
+            transitions: transitions,
+            lifecycleExcerpt: lifecycleExcerpt
+        )
     }
 }
 

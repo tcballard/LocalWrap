@@ -96,6 +96,8 @@ struct ContentView: View {
             WelcomeDetailView { project in
                 appModel.navigationRouter.show(.project(project.id))
             }
+        case .attention:
+            AttentionDetailView()
         case .workspaces:
             WorkspaceDetailView(selection: selectionBinding, initialTarget: nil)
         case .workspace(let target):

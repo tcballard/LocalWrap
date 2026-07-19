@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct WorkspaceDetailView: View {
     @Environment(AppModel.self) private var appModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var selection: AppSelection?
     @State private var target: WorkspaceTarget
     @State private var importing = false
@@ -14,6 +15,9 @@ struct WorkspaceDetailView: View {
     @State private var editingProfile = false
     @State private var profileName = ""
     @State private var profileProjectIDs = Set<String>()
+    @State private var doctorNavigation = WorkspaceDoctorNavigationState()
+    @State private var highlightedDoctorCheck: WorkspaceCheckID?
+    @State private var highlightedDoctorProjectID: String?
 
     init(selection: Binding<AppSelection?>, initialTarget: WorkspaceTarget?) {
         _selection = selection
@@ -21,8 +25,9 @@ struct WorkspaceDetailView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Workspace").font(.largeTitle.bold())
@@ -98,15 +103,28 @@ struct WorkspaceDetailView: View {
                         metric("Warnings", diagnosis.totals.warnings)
                         metric("Blocked", diagnosis.totals.blockers)
                     }
-                    WorkspaceDoctorPanelView(diagnosis: diagnosis) { id in
-                        selection = .project(id)
-                    }
+                    WorkspaceDoctorPanelView(
+                        diagnosis: diagnosis,
+                        navigationRequest: doctorNavigation.pendingRequest,
+                        highlightedCheck: highlightedDoctorCheck,
+                        highlightedProjectID: highlightedDoctorProjectID,
+                        onNavigationAnchorMounted: { acknowledgement in
+                            handleMountedDoctorAnchor(acknowledgement, proxy: proxy)
+                        },
+                        openProject: { id in
+                            selection = .project(id)
+                        }
+                    )
                 }
                 if let operation = appModel.workspaceOperation {
                     WorkspaceOperationResultsView(summary: operation)
                 }
+                }
+                .padding(28)
             }
-            .padding(28)
+            .task(id: appModel.navigationRouter.attentionRequest?.id) {
+                handleAttentionRequest()
+            }
         }
         .navigationTitle("Workspace")
         .onAppear { appModel.diagnoseWorkspace(target: target) }
@@ -153,6 +171,39 @@ struct WorkspaceDetailView: View {
 
     private func run(_ target: WorkspaceTarget, readyOnly: Bool) {
         Task { await appModel.startWorkspace(target: target, readyOnly: readyOnly) }
+    }
+
+    private func handleAttentionRequest() {
+        guard let request = appModel.navigationRouter.attentionRequest,
+              case .workspace(let requestedTarget, let projectID) = request.target else {
+            doctorNavigation.cancel()
+            return
+        }
+
+        target = requestedTarget
+        highlightedDoctorCheck = nil
+        highlightedDoctorProjectID = projectID
+        doctorNavigation.begin(
+            requestID: request.id,
+            anchor: projectID.map(WorkspaceDoctorAnchor.project) ?? .surface
+        )
+        appModel.diagnoseWorkspace(target: requestedTarget)
+    }
+
+    private func handleMountedDoctorAnchor(
+        _ acknowledgement: WorkspaceDoctorMountedAnchor,
+        proxy: ScrollViewProxy
+    ) {
+        guard doctorNavigation.acknowledgeMounted(acknowledgement) else { return }
+        if reduceMotion {
+            proxy.scrollTo(acknowledgement.anchor.id, anchor: .center)
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                proxy.scrollTo(acknowledgement.anchor.id, anchor: .center)
+            }
+        }
+        guard doctorNavigation.complete(acknowledgement) else { return }
+        appModel.navigationRouter.consumeAttentionRequest(id: acknowledgement.requestID)
     }
 
     private func performExport(to root: URL, overwrite: Bool) {
