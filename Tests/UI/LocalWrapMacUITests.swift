@@ -124,11 +124,14 @@ final class LocalWrapMacUITests: XCTestCase {
             object: nil
         )
         XCTAssertEqual(XCTWaiter.wait(for: [reloadOrStop], timeout: 2), .completed)
-        XCTAssertTrue(app.descendants(matching: .any)["previewViewportPicker"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["previewURL"].exists)
-        XCTAssertTrue(app.buttons["openPreviewExternalButton"].exists)
-        let closePreview = app.buttons["closePreviewButton"]
-        XCTAssertTrue(closePreview.exists)
+        XCTAssertTrue(app.popUpButtons["Viewport Width"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["Current preview URL"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.buttons["Open in Browser"].waitForExistence(timeout: 3))
+        let closePreview = app.buttons["Close Preview"]
+        XCTAssertTrue(closePreview.waitForExistence(timeout: 3))
         closePreview.click()
         XCTAssertTrue(
             app.descendants(matching: .any)["projectPreview"].waitForNonExistence(timeout: 2)
@@ -177,9 +180,9 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackMetric-workspaces"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackMetric-warnings"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackMetric-blockers"].exists)
-        XCTAssertTrue(app.buttons["revealWorkspaceManifest"].exists)
-        XCTAssertTrue(app.buttons["copyWorkspaceManifestPath"].exists)
-        XCTAssertTrue(app.buttons["reviewWorkspaceManifestAgain"].exists)
+        XCTAssertTrue(app.buttons["Reveal Manifest"].exists)
+        XCTAssertTrue(app.buttons["Copy Path"].exists)
+        XCTAssertTrue(app.buttons["Review Again"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackIssue-warning-fixture-warning-project-web-url"].exists)
         let reviewScrollView = review.scrollViews.firstMatch
         let webProject = app.descendants(matching: .any)["workspacePackProject-web"]
@@ -257,12 +260,12 @@ final class LocalWrapMacUITests: XCTestCase {
         aboutItem.click()
 
         XCTAssertTrue(app.staticTexts["LocalWrapMac"].waitForExistence(timeout: 3))
-        let version = app.staticTexts.matching(NSPredicate(
-            format: "label BEGINSWITH %@",
-            "Version "
+        let version = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@",
+            "0.1.1"
         )).firstMatch
         XCTAssertTrue(version.waitForExistence(timeout: 3))
-        XCTAssertGreaterThan(version.label.count, "Version ".count)
+        XCTAssertTrue(version.label.contains("0.1.1"))
     }
 
     func testMenuBarActionsReflectReadyBackgroundProjectAndShowHiddenWindow() {
