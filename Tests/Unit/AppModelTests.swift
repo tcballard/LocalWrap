@@ -157,7 +157,8 @@ final class AppModelTests: XCTestCase {
         for _ in 0..<500 {
             if model.runtimeBootstrapState == .ready,
                launcher.prepareCount == 1,
-               launcher.monitorCount == 1 {
+               launcher.monitorCount == 1,
+               model.runtime(for: fresh.id).status == .ready {
                 break
             }
             try await Task.sleep(for: .milliseconds(5))
