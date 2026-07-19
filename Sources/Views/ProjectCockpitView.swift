@@ -60,21 +60,35 @@ struct ProjectCockpitView: View {
                     Button(action: start) {
                         Label("Start", systemImage: "play.fill")
                     }
-                    .disabled(runtime.status.isActive || editorIsDirty)
+                    .disabled(
+                        !appModel.runtimeControlsAvailable
+                            || runtime.status.isActive
+                            || runtime.ownership.hasUnresolvedRun
+                            || editorIsDirty
+                    )
                     .help("Start Project")
                     .accessibilityIdentifier("startProjectButton")
 
                     Button(action: stop) {
                         Label("Stop", systemImage: "stop.fill")
                     }
-                    .disabled(!runtime.status.isActive)
+                    .disabled(
+                        !appModel.runtimeControlsAvailable
+                            || !runtime.status.isActive
+                            || !canSignal(runtime)
+                    )
                     .help("Stop Project")
                     .accessibilityIdentifier("stopProjectButton")
 
                     Button(action: restart) {
                         Label("Restart", systemImage: "arrow.clockwise")
                     }
-                    .disabled(!canRestart(runtime.status) || editorIsDirty)
+                    .disabled(
+                        !appModel.runtimeControlsAvailable
+                            || !canSignal(runtime)
+                            || !canRestart(runtime.status)
+                            || editorIsDirty
+                    )
                     .help("Restart Project")
                     .accessibilityIdentifier("restartProjectButton")
                 }
@@ -139,6 +153,11 @@ struct ProjectCockpitView: View {
                 Button("Delete Project", role: .destructive) {
                     confirmsDeletion = true
                 }
+                .disabled(
+                    !appModel.runtimeControlsAvailable
+                        || runtime.status.isActive
+                        || runtime.ownership.hasUnresolvedRun
+                )
             } label: {
                 Label("More", systemImage: "ellipsis.circle")
             }
@@ -182,9 +201,17 @@ struct ProjectCockpitView: View {
 
     private func commandActions(runtime: RuntimeSnapshot) -> ProjectCommandActions {
         ProjectCommandActions(
-            canStart: !runtime.status.isActive && !editorIsDirty,
-            canStop: runtime.status.isActive,
-            canRestart: canRestart(runtime.status) && !editorIsDirty,
+            canStart: appModel.runtimeControlsAvailable
+                && !runtime.status.isActive
+                && !runtime.ownership.hasUnresolvedRun
+                && !editorIsDirty,
+            canStop: appModel.runtimeControlsAvailable
+                && runtime.status.isActive
+                && canSignal(runtime),
+            canRestart: appModel.runtimeControlsAvailable
+                && canSignal(runtime)
+                && canRestart(runtime.status)
+                && !editorIsDirty,
             start: start,
             stop: stop,
             restart: restart
@@ -217,5 +244,9 @@ struct ProjectCockpitView: View {
 
     private func canRestart(_ status: RuntimeStatus) -> Bool {
         status != .starting && status != .stopping
+    }
+
+    private func canSignal(_ runtime: RuntimeSnapshot) -> Bool {
+        runtime.ownership == .none || runtime.ownership.permitsSignalling
     }
 }

@@ -75,11 +75,14 @@ final class LocalWrapMacUITests: XCTestCase {
 
     func testClosingMainWindowHidesAndApplicationActivationReopensIt() {
         let app = XCUIApplication()
-        app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+        app.launchArguments += [
+            "-ApplePersistenceIgnoreState", "YES", "--ui-test-preview",
+        ]
         app.launch()
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.descendants(matching: .any)["projectStatus"].label, "ready")
         let closeButton = window.buttons[XCUIIdentifierCloseWindow]
         XCTAssertTrue(closeButton.exists)
         closeButton.click()
@@ -87,7 +90,7 @@ final class LocalWrapMacUITests: XCTestCase {
 
         app.activate()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["Welcome to LocalWrapMac"].exists)
+        XCTAssertEqual(app.descendants(matching: .any)["projectStatus"].label, "ready")
     }
 
     func testReadyProjectExposesPreviewControlsWithoutNativeBridge() {
@@ -189,6 +192,23 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(app.buttons["confirmWorkspacePackImport"].isEnabled)
         XCTAssertTrue(app.buttons["Import Projects"].exists)
         XCTAssertTrue(app.staticTexts["Projects remain stopped after import."].exists)
+    }
+
+    func testRuntimeConflictIsVisibleAndCannotBeStartedAgain() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-ApplePersistenceIgnoreState", "YES", "--ui-test-runtime-reconciliation",
+        ]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["Recovered Runtime"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["running-unresponsive"].exists)
+        XCTAssertTrue(
+            app.staticTexts[
+                "The recorded process identity no longer matches. LocalWrap did not signal it."
+            ].exists
+        )
+        XCTAssertFalse(app.buttons["startProjectButton"].isEnabled)
     }
 
     func testStandardAboutPanelUsesNativeBundleMetadata() {

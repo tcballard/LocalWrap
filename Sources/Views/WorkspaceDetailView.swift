@@ -45,22 +45,39 @@ struct WorkspaceDetailView: View {
 
                 HStack(spacing: 10) {
                     Button("Resume") { run(.lastRunning, readyOnly: false) }
-                        .disabled(appModel.workspace.lastRunningProjectIds.isEmpty || appModel.isWorkspaceOperating)
+                        .disabled(
+                            !appModel.runtimeControlsAvailable
+                                || appModel.workspace.lastRunningProjectIds.isEmpty
+                                || appModel.isWorkspaceOperating
+                        )
                         .accessibilityIdentifier("resumeWorkspaceButton")
                     Button("Start Ready") { run(target, readyOnly: true) }
                         .buttonStyle(.borderedProminent)
-                        .disabled(!canStartReady || appModel.isWorkspaceOperating)
+                        .disabled(
+                            !appModel.runtimeControlsAvailable
+                                || !canStartReady
+                                || appModel.isWorkspaceOperating
+                        )
                         .accessibilityIdentifier("startReadyWorkspaceButton")
                     Button("Start All") { run(target, readyOnly: false) }
-                        .disabled(appModel.projects.isEmpty || appModel.isWorkspaceOperating)
+                        .disabled(
+                            !appModel.runtimeControlsAvailable
+                                || appModel.projects.isEmpty
+                                || appModel.isWorkspaceOperating
+                        )
                         .accessibilityIdentifier("startAllWorkspaceButton")
                     Button("Stop All") { Task { await appModel.stopAllProjects() } }
-                        .disabled(appModel.runningProjectCount == 0 && !appModel.isWorkspaceOperating)
+                        .disabled(
+                            !appModel.runtimeControlsAvailable
+                                || (appModel.runningProjectCount == 0
+                                    && !appModel.isWorkspaceOperating)
+                        )
                         .accessibilityIdentifier("stopAllWorkspaceButton")
                     Spacer()
                     Button("Create / Update Workspace") { prepareProfileEditor() }
                         .disabled(appModel.projects.isEmpty || appModel.isWorkspaceOperating)
                     Button("Import Workspace") { importing = true }
+                        .disabled(!appModel.runtimeControlsAvailable)
                         .accessibilityIdentifier("importWorkspaceButton")
                     Button("Export Workspace") { exporting = true }
                         .disabled(appModel.projects.isEmpty)
@@ -95,8 +112,11 @@ struct WorkspaceDetailView: View {
         .onAppear { appModel.diagnoseWorkspace(target: target) }
         .onChange(of: target) { _, value in appModel.diagnoseWorkspace(target: value) }
         .focusedValue(\.workspaceCommandActions, WorkspaceCommandActions(
-            canStart: !appModel.projects.isEmpty && !appModel.isWorkspaceOperating,
-            canStop: appModel.runningProjectCount > 0 || appModel.isWorkspaceOperating,
+            canStart: appModel.runtimeControlsAvailable
+                && !appModel.projects.isEmpty
+                && !appModel.isWorkspaceOperating,
+            canStop: appModel.runtimeControlsAvailable
+                && (appModel.runningProjectCount > 0 || appModel.isWorkspaceOperating),
             startReady: { run(target, readyOnly: true) },
             startAll: { run(target, readyOnly: false) },
             stopAll: { Task { await appModel.stopAllProjects() } }

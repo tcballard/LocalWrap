@@ -33,6 +33,37 @@ final class RuntimeServiceTests: XCTestCase {
         XCTAssertEqual(exitCode, 0)
     }
 
+    func testPosixLauncherBoundsNewlineFreeOutput() async throws {
+        let recorder = ProcessRecorder()
+        let process = try PosixProcessLauncher().launch(
+            executable: URL(fileURLWithPath: "/usr/bin/printf"),
+            arguments: [String(repeating: "x", count: 70_000)],
+            environment: ProcessInfo.processInfo.environment,
+            workingDirectory: FileManager.default.temporaryDirectory,
+            onOutput: { line in
+                Task { await recorder.record(line: line) }
+            },
+            onExit: { code in
+                Task { await recorder.record(exitCode: code) }
+            }
+        )
+
+        for _ in 0..<100 where process.isRunning {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        for _ in 0..<100 {
+            if await recorder.exitCode != nil { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+
+        let lines = await recorder.lines
+        let exitCode = await recorder.exitCode
+        XCTAssertEqual(lines.count, 1)
+        XCTAssertTrue(lines.first?.hasSuffix("… [output line truncated]") == true)
+        XCTAssertLessThanOrEqual(lines.first?.utf8.count ?? .max, 66_000)
+        XCTAssertEqual(exitCode, 0)
+    }
+
     func testLifecycleReachesReadyAndBoundsLogs() async throws {
         let launcher = FakeProcessLauncher()
         let service = RuntimeService(
@@ -57,7 +88,7 @@ final class RuntimeServiceTests: XCTestCase {
         XCTAssertEqual(state.logs.last, "line-500")
     }
 
-    func testStopSignalsTheWholeProcessGroupAndEndsStopped() async throws {
+    func testLegacyStopFailsClosedWithoutVerifiedOwnership() async throws {
         let launcher = FakeProcessLauncher()
         let service = RuntimeService(
             environmentResolver: testEnvironmentResolver(),
@@ -71,11 +102,12 @@ final class RuntimeServiceTests: XCTestCase {
 
         let state = await service.stop(projectID: project.id)
 
-        XCTAssertEqual(launcher.process?.signals, [SIGTERM])
-        XCTAssertEqual(state.status, .stopped)
-        XCTAssertNil(state.pid)
-        XCTAssertEqual(state.diagnosis.status, .stopped)
-        XCTAssertEqual(state.diagnosis.check(.process).status, .pending)
+        XCTAssertTrue(launcher.process?.signals.isEmpty == true)
+        XCTAssertEqual(state.status, .runningUnresponsive)
+        XCTAssertNotNil(state.pid)
+        XCTAssertEqual(state.terminalReason, .ownershipUnverifiable)
+        XCTAssertEqual(state.diagnosis.status, .attention)
+        XCTAssertEqual(state.diagnosis.check(.process).status, .warn)
     }
 
     func testUnexpectedNonzeroExitBecomesFailed() async throws {
@@ -96,9 +128,31 @@ final class RuntimeServiceTests: XCTestCase {
 
         XCTAssertEqual(state.status, .failed)
         XCTAssertEqual(state.exitCode, 2)
-        XCTAssertEqual(state.error, "Process exited with code 2.")
+        XCTAssertEqual(state.error, "Process exited unexpectedly with code 2.")
+        XCTAssertEqual(state.terminalReason, .unexpectedExit(code: 2))
         XCTAssertEqual(state.diagnosis.status, .failed)
         XCTAssertEqual(state.diagnosis.check(.process).status, .fail)
+    }
+
+    func testUnrequestedZeroExitIsStillAnUnexpectedRuntimeFailure() async throws {
+        let launcher = FakeProcessLauncher()
+        let service = RuntimeService(
+            environmentResolver: testEnvironmentResolver(),
+            launcher: launcher,
+            readiness: FixedReadiness(result: false),
+            doctor: makeDoctor(),
+            isDirectory: { _ in true }
+        )
+        let project = makeProject()
+        _ = try await service.start(project)
+
+        launcher.process?.exit(code: 0)
+        try await Task.sleep(for: .milliseconds(50))
+        let state = await service.snapshot(for: project.id)
+
+        XCTAssertEqual(state.status, .failed)
+        XCTAssertEqual(state.terminalReason, .unexpectedExit(code: 0))
+        XCTAssertEqual(state.error, "Process exited unexpectedly with code 0.")
     }
 
     func testReadinessTimeoutBecomesRunningUnresponsive() async throws {
@@ -123,7 +177,7 @@ final class RuntimeServiceTests: XCTestCase {
         _ = await service.stop(projectID: project.id)
     }
 
-    func testRestartStopsTheOldRunBeforeLaunchingAgain() async throws {
+    func testLegacyRestartDoesNotReplaceAnUnverifiedRun() async throws {
         let launcher = FakeProcessLauncher()
         let service = RuntimeService(
             environmentResolver: testEnvironmentResolver(),
@@ -136,13 +190,19 @@ final class RuntimeServiceTests: XCTestCase {
         _ = try await service.start(project)
         let first = try XCTUnwrap(launcher.process)
 
-        _ = try await service.restart(project)
+        do {
+            _ = try await service.restart(project)
+            XCTFail("Expected restart to fail closed")
+        } catch let error as RuntimeError {
+            guard case .ownershipNotVerified = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+        }
 
-        XCTAssertEqual(first.signals, [SIGTERM])
-        XCTAssertEqual(launcher.launchCount, 2)
+        XCTAssertTrue(first.signals.isEmpty)
+        XCTAssertEqual(launcher.launchCount, 1)
         let restarted = await service.snapshot(for: project.id)
-        XCTAssertTrue(restarted.diagnosis.timeline.contains { $0.message == "Restarted project." })
-        _ = await service.stop(projectID: project.id)
+        XCTAssertEqual(restarted.terminalReason, .ownershipUnverifiable)
     }
 
     func testBundledSampleReachesReadyAndLeavesNoProcessGroup() async throws {
@@ -163,7 +223,18 @@ final class RuntimeServiceTests: XCTestCase {
             createdAt: "2026-07-10T12:00:00Z",
             updatedAt: "2026-07-10T12:00:00Z"
         )
-        let service = RuntimeService()
+        let ledgerDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalWrapRuntimeServiceTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: ledgerDirectory) }
+        let ledger = RuntimeLedgerStore(paths: RuntimeLedgerPaths(
+            directory: ledgerDirectory,
+            ledger: ledgerDirectory.appendingPathComponent("runtime-ledger.json")
+        ))
+        let service = RuntimeService(
+            launcher: PosixProcessLauncher(),
+            ledgerStore: ledger,
+            processInspector: DarwinProcessInspector()
+        )
         let started = try await service.start(project)
         let pid = try XCTUnwrap(started.pid)
 
@@ -248,7 +319,7 @@ final class RuntimeServiceTests: XCTestCase {
         XCTAssertEqual(state.diagnosis.check(.readiness).status, .pending)
     }
 
-    func testFailedCleanupUpdatesProcessCheckSummaryAndTimeline() async throws {
+    func testStubbornLegacyProcessIsNotSignalledWithoutOwnershipEvidence() async throws {
         let launcher = StubbornProcessLauncher()
         let service = RuntimeService(
             environmentResolver: testEnvironmentResolver(),
@@ -264,11 +335,11 @@ final class RuntimeServiceTests: XCTestCase {
 
         let state = await service.stop(projectID: project.id)
 
-        XCTAssertEqual(launcher.process.signals, [SIGTERM, SIGKILL])
+        XCTAssertTrue(launcher.process.signals.isEmpty)
         XCTAssertEqual(state.status, .runningUnresponsive)
-        XCTAssertEqual(state.diagnosis.status, .failed)
-        XCTAssertEqual(state.diagnosis.check(.process).status, .fail)
-        XCTAssertTrue(state.diagnosis.timeline.contains { $0.message == "Process cleanup failed." })
+        XCTAssertEqual(state.terminalReason, .ownershipUnverifiable)
+        XCTAssertEqual(state.diagnosis.status, .attention)
+        XCTAssertEqual(state.diagnosis.check(.process).status, .warn)
     }
 
     private func testEnvironmentResolver() -> EnvironmentResolver {

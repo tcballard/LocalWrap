@@ -3,16 +3,10 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var selection: AppSelection? = AppSelection.initial
     let registerMainWindow: @MainActor (NSWindow) -> Void
 
     init(registerMainWindow: @escaping @MainActor (NSWindow) -> Void) {
         self.registerMainWindow = registerMainWindow
-        #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--ui-test-preview") {
-            _selection = State(initialValue: .project("ui-preview"))
-        }
-        #endif
     }
 
     var body: some View {
@@ -29,7 +23,7 @@ struct ContentView: View {
 
     private var mainContent: some View {
         NavigationSplitView {
-            SidebarView(selection: $selection)
+            SidebarView(selection: selectionBinding)
         } detail: {
             detail
         }
@@ -42,7 +36,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    selection = .newProject
+                    appModel.navigationRouter.show(.newProject)
                 } label: {
                     Label("Add Project", systemImage: "plus")
                 }
@@ -83,12 +77,12 @@ struct ContentView: View {
             switch proposal {
             case .project(let projectProposal):
                 RepositoryReviewView(proposal: projectProposal) { project in
-                    selection = .project(project.id)
+                    appModel.navigationRouter.show(.project(project.id))
                 }
             case .workspace(let review):
                 WorkspacePackReviewView(review: review) {
                     if appModel.importWorkspacePack(review) {
-                        selection = .workspaces
+                        appModel.navigationRouter.show(.workspaces)
                     }
                 }
             }
@@ -97,24 +91,33 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detail: some View {
-        switch selection ?? .welcome {
+        switch appModel.navigationRouter.selection ?? .welcome {
         case .welcome:
-            WelcomeDetailView { project in selection = .project(project.id) }
+            WelcomeDetailView { project in
+                appModel.navigationRouter.show(.project(project.id))
+            }
         case .workspaces:
-            WorkspaceDetailView(selection: $selection, initialTarget: nil)
+            WorkspaceDetailView(selection: selectionBinding, initialTarget: nil)
         case .workspace(let target):
-            WorkspaceDetailView(selection: $selection, initialTarget: target)
+            WorkspaceDetailView(selection: selectionBinding, initialTarget: target)
         case .projects:
-            ProjectsOverviewView(selection: $selection)
+            ProjectsOverviewView(selection: selectionBinding)
         case .project(let id):
-            ProjectCockpitView(projectID: id, selection: $selection)
+            ProjectCockpitView(projectID: id, selection: selectionBinding)
                 .id(id)
         case .newProject:
             ScrollView {
-                ProjectEditorView(project: nil, selection: $selection)
+                ProjectEditorView(project: nil, selection: selectionBinding)
                     .padding(32)
             }
         }
+    }
+
+    private var selectionBinding: Binding<AppSelection?> {
+        Binding(
+            get: { appModel.navigationRouter.selection },
+            set: { appModel.navigationRouter.select($0) }
+        )
     }
 
     private var releaseNoticeBinding: Binding<ReleaseNotice?> {
