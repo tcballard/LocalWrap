@@ -23,7 +23,8 @@ struct MenuBarContentView: View {
             Task { await appModel.startWorkspace(target: .lastRunning, readyOnly: false) }
         }
         .disabled(
-            appModel.runningProjectCount > 0
+            !appModel.runtimeControlsAvailable
+                || appModel.runningProjectCount > 0
                 || appModel.workspace.lastRunningProjectIds.isEmpty
                 || appModel.isWorkspaceOperating
         )
@@ -31,12 +32,20 @@ struct MenuBarContentView: View {
         Button("Start All Projects") {
             Task { await appModel.startWorkspace(target: .allProjects, readyOnly: false) }
         }
-        .disabled(appModel.projects.isEmpty || appModel.isWorkspaceOperating)
+        .disabled(
+            !appModel.runtimeControlsAvailable
+                || appModel.projects.isEmpty
+                || appModel.isWorkspaceOperating
+        )
 
         Button("Stop All Running Projects") {
             Task { await appModel.stopAllProjects() }
         }
-        .disabled(appModel.runningProjectCount == 0 || appModel.isWorkspaceOperating)
+        .disabled(
+            !appModel.runtimeControlsAvailable
+                || appModel.runningProjectCount == 0
+                || appModel.isWorkspaceOperating
+        )
 
         Divider()
 
@@ -51,7 +60,11 @@ struct MenuBarContentView: View {
                     Button("Stop") {
                         Task { await appModel.stopProject(id: project.id) }
                     }
-                    .disabled(appModel.runtime(for: project.id).status == .stopping)
+                    .disabled(
+                        !appModel.runtimeControlsAvailable
+                            || appModel.runtime(for: project.id).status == .stopping
+                            || !canSignal(appModel.runtime(for: project.id))
+                    )
                 }
             }
         }
@@ -77,5 +90,9 @@ struct MenuBarContentView: View {
 
     private func shortTitle(_ value: String) -> String {
         value.count <= 30 ? value : String(value.prefix(27)) + "..."
+    }
+
+    private func canSignal(_ runtime: RuntimeSnapshot) -> Bool {
+        runtime.ownership == .none || runtime.ownership.permitsSignalling
     }
 }

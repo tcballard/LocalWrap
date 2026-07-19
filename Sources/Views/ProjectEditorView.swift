@@ -97,17 +97,30 @@ struct ProjectEditorView: View {
             HStack {
                 Button("Save") { save(start: false) }
                     .keyboardShortcut("s", modifiers: [.command])
-                    .disabled(!canSave)
+                    .disabled(
+                        !canSave
+                            || (project != nil && !appModel.runtimeControlsAvailable)
+                    )
                     .accessibilityIdentifier("saveProjectButton")
                 Button("Save & Start") { save(start: true) }
                     .buttonStyle(.borderedProminent)
-                    .disabled(!canSave || runtime.status.isActive)
+                    .disabled(
+                        !appModel.runtimeControlsAvailable
+                            || !canSave
+                            || runtime.status.isActive
+                            || runtime.ownership.hasUnresolvedRun
+                    )
                     .accessibilityIdentifier("saveAndStartButton")
             }
 
             DoctorPanelView(
                 diagnosis: effectiveDiagnosis,
-                actionsDisabled: project != nil && (isDirty || runtime.status.isActive),
+                actionsDisabled: project != nil && (
+                    !appModel.runtimeControlsAvailable
+                        || isDirty
+                        || runtime.status.isActive
+                        || runtime.ownership.hasUnresolvedRun
+                ),
                 perform: performDoctorAction
             )
         }

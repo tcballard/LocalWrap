@@ -13,12 +13,15 @@ final class AppModel {
     private(set) var runtimes: [String: RuntimeSnapshot]
     private(set) var workspaceDiagnosis: WorkspaceDiagnosis?
     private(set) var workspaceOperation: WorkspaceOperationSummary?
+    private(set) var runtimeReconciliationReport: RuntimeReconciliationReport
+    private(set) var runtimeBootstrapState: RuntimeBootstrapState
     private(set) var isWorkspaceOperating: Bool
     private(set) var isCheckingForUpdates: Bool
     var releaseNotice: ReleaseNotice?
     var selectedWorkspaceTarget: WorkspaceTarget?
     var errorMessage: String?
     private(set) var repositoryOpenProposal: RepositoryOpenProposal?
+    let navigationRouter: NavigationRouter
 
     var repositoryProposal: RepositoryProposal? {
         guard case .project(let proposal) = repositoryOpenProposal else { return nil }
@@ -40,6 +43,10 @@ final class AppModel {
     private let directoryPicker: DirectoryPickerService
     private let repositoryOnboarding: RepositoryOnboardingService
     private var openedReadyRunIDs: Set<String>
+    private var runtimeBootstrapGeneration = UUID()
+    private var runtimeBootstrapTask: Task<Void, Never>?
+    private var workspaceOperationGeneration = UUID()
+    private var isShuttingDown = false
 
     init(
         projectCount: Int = 0,
@@ -49,6 +56,8 @@ final class AppModel {
         projects: [Project] = [],
         workspace: WorkspaceState = .empty,
         initialRuntimes: [String: RuntimeSnapshot] = [:],
+        runtimeReconciliationReport: RuntimeReconciliationReport = .empty,
+        runtimeBootstrapState: RuntimeBootstrapState = .ready,
         store: ProjectStore? = nil,
         runtimeService: RuntimeService = RuntimeService(),
         doctorService: ProjectDoctorService = ProjectDoctorService(),
@@ -70,7 +79,8 @@ final class AppModel {
         directoryPicker: DirectoryPickerService = .live,
         repositoryOnboarding: RepositoryOnboardingService? = nil,
         repositoryProposal: RepositoryProposal? = nil,
-        repositoryOpenProposal: RepositoryOpenProposal? = nil
+        repositoryOpenProposal: RepositoryOpenProposal? = nil,
+        navigationRouter: NavigationRouter? = nil
     ) {
         self.projects = projects
         self.workspace = workspace
@@ -85,6 +95,8 @@ final class AppModel {
         runtimes = initialRuntimes
         workspaceDiagnosis = nil
         workspaceOperation = nil
+        self.runtimeReconciliationReport = runtimeReconciliationReport
+        self.runtimeBootstrapState = runtimeBootstrapState
         isWorkspaceOperating = false
         isCheckingForUpdates = false
         releaseNotice = nil
@@ -107,6 +119,10 @@ final class AppModel {
             ?? RepositoryOnboardingService(workspacePacks: workspacePacks)
         self.repositoryOpenProposal = repositoryOpenProposal
             ?? repositoryProposal.map(RepositoryOpenProposal.project)
+        self.navigationRouter = navigationRouter ?? NavigationRouter(
+            projects: projects,
+            workspace: workspace
+        )
         openedReadyRunIDs = []
     }
 
@@ -119,6 +135,7 @@ final class AppModel {
         workspaceDoctor: WorkspaceDoctorService = WorkspaceDoctorService(),
         workspaceOrchestration: WorkspaceOrchestrationService? = nil,
         workspacePacks: WorkspacePackService = WorkspacePackService(),
+        sessionStore: SessionStateStore = SessionStateStore(),
         releaseChecker: ReleaseCheckService = ReleaseCheckService(),
         currentVersion: @escaping @Sendable () -> String = {
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
@@ -131,6 +148,7 @@ final class AppModel {
                 persistenceStatus: .ready(result.outcome),
                 projects: result.document.projects,
                 workspace: result.document.workspace,
+                runtimeBootstrapState: runtimeService.managesPersistentRuns ? .reconciling : .ready,
                 store: store,
                 runtimeService: runtimeService,
                 doctorService: doctorService,
@@ -140,17 +158,22 @@ final class AppModel {
                 workspaceOrchestration: workspaceOrchestration,
                 workspacePacks: workspacePacks,
                 releaseChecker: releaseChecker,
-                currentVersion: currentVersion
+                currentVersion: currentVersion,
+                navigationRouter: NavigationRouter(
+                    store: sessionStore,
+                    projects: result.document.projects,
+                    workspace: result.document.workspace
+                )
             )
-            model.connectRuntimeEvents()
-            model.scheduleAutostart()
+            model.scheduleRuntimeBootstrap()
             return model
         } catch {
-            return AppModel(
+            let model = AppModel(
                 persistenceStatus: .recoveryRequired(
                     message: error.localizedDescription,
                     backupAvailable: store.hasBackup()
                 ),
+                runtimeBootstrapState: runtimeService.managesPersistentRuns ? .reconciling : .ready,
                 store: store,
                 runtimeService: runtimeService,
                 doctorService: doctorService,
@@ -162,6 +185,8 @@ final class AppModel {
                 releaseChecker: releaseChecker,
                 currentVersion: currentVersion
             )
+            model.scheduleRuntimeBootstrap()
+            return model
         }
     }
 
@@ -380,15 +405,51 @@ final class AppModel {
                         status: .ready,
                         readinessMessage: "Ready for preview."
                     ),
-                ]
+                ],
+                navigationRouter: NavigationRouter(selection: .project(id))
+            )
+        }
+        if ProcessInfo.processInfo.arguments.contains("--ui-test-runtime-reconciliation") {
+            let id = "ui-runtime-conflict"
+            return AppModel(
+                projects: [Project(
+                    id: id,
+                    name: "Recovered Runtime",
+                    cwd: "/tmp",
+                    command: "npm start",
+                    port: 4_321,
+                    url: "http://localhost:4321",
+                    createdAt: "2026-07-18T00:00:00Z",
+                    updatedAt: "2026-07-18T00:00:00Z"
+                )],
+                initialRuntimes: [
+                    id: RuntimeSnapshot(
+                        status: .runningUnresponsive,
+                        runID: "fixture-run",
+                        ownership: .conflicting(
+                            runID: "fixture-run",
+                            reason: .identityMismatch
+                        ),
+                        terminalReason: .ownershipConflict,
+                        pid: 7_001,
+                        logs: ["[reconciliation] Process identity changed."],
+                        startedAt: "2026-07-18T00:00:00Z",
+                        readinessMessage: "The recorded process identity no longer matches. LocalWrap did not signal it."
+                    ),
+                ],
+                navigationRouter: NavigationRouter(selection: .project(id))
             )
         }
         #endif
-        return live()
+        return live(runtimeService: .live())
     }
 
     var menuStatusSummary: String {
         MenuStatusFormatter.summary(running: runningProjectCount, saved: projectCount)
+    }
+
+    var runtimeControlsAvailable: Bool {
+        runtimeBootstrapState.permitsMutation && !isShuttingDown
     }
 
     var readyProjects: [Project] {
@@ -580,8 +641,8 @@ final class AppModel {
             projectCount = projects.count
             workspaceCount = workspace.savedWorkspaces.count
             persistenceStatus = .ready(.existingNativeStore)
-            connectRuntimeEvents()
-            scheduleAutostart()
+            navigationRouter.revalidate(projects: projects, workspace: workspace)
+            scheduleRuntimeBootstrap()
             errorMessage = nil
             return true
         } catch {
@@ -591,6 +652,7 @@ final class AppModel {
     }
 
     func startProject(id: String) async throws {
+        try requireRuntimeBootstrap()
         guard let project = project(id: id) else { return }
         do {
             let state = try await runtimeService.start(project)
@@ -603,11 +665,16 @@ final class AppModel {
     }
 
     func stopProject(id: String) async {
+        guard runtimeControlsAvailable else {
+            errorMessage = runtimeBootstrapMessage
+            return
+        }
         let state = await runtimeService.stop(projectID: id)
         receiveRuntime(projectID: id, state: state)
     }
 
     func restartProject(id: String) async throws {
+        try requireRuntimeBootstrap()
         guard let project = project(id: id) else { return }
         do {
             let state = try await runtimeService.restart(project)
@@ -690,10 +757,20 @@ final class AppModel {
     }
 
     func startWorkspace(target: WorkspaceTarget? = nil, readyOnly: Bool) async {
+        guard runtimeControlsAvailable else {
+            errorMessage = runtimeBootstrapMessage
+            return
+        }
         guard !isWorkspaceOperating else { return }
+        let generation = UUID()
+        workspaceOperationGeneration = generation
         isWorkspaceOperating = true
         selectedWorkspaceTarget = target
-        defer { isWorkspaceOperating = false }
+        defer {
+            if workspaceOperationGeneration == generation {
+                isWorkspaceOperating = false
+            }
+        }
         do {
             let (diagnosis, operation) = try await workspaceOrchestration.start(
                 projects: projects,
@@ -701,6 +778,7 @@ final class AppModel {
                 target: target,
                 startReadyOnly: readyOnly
             )
+            guard workspaceOperationGeneration == generation else { return }
             workspaceDiagnosis = diagnosis
             workspaceOperation = operation
             if let profileID = diagnosis.target.profileID {
@@ -712,16 +790,25 @@ final class AppModel {
             try reloadPersistence()
             errorMessage = nil
         } catch {
+            guard workspaceOperationGeneration == generation else { return }
             errorMessage = error.localizedDescription
         }
     }
 
     func stopAllProjects() async {
+        guard runtimeControlsAvailable else {
+            errorMessage = runtimeBootstrapMessage
+            return
+        }
+        let generation = UUID()
+        workspaceOperationGeneration = generation
         do { try captureActiveProjectIDs() }
         catch { errorMessage = error.localizedDescription }
         isWorkspaceOperating = true
         await workspaceOrchestration.stopAll()
+        guard workspaceOperationGeneration == generation else { return }
         isWorkspaceOperating = false
+        workspaceOperation = nil
     }
 
     @discardableResult
@@ -746,6 +833,7 @@ final class AppModel {
         }
         guard let store else { return false }
         do {
+            try requireRuntimeBootstrap()
             _ = try workspacePacks.importReviewed(review, into: store)
             try reloadPersistence()
             selectedWorkspaceTarget = .allProjects
@@ -785,7 +873,8 @@ final class AppModel {
             guard change.entity == .project,
                   change.disposition == .update,
                   let projectID = change.existingSavedID,
-                  runtime(for: projectID).status.isActive else { return nil }
+                  runtime(for: projectID).status.isActive
+                    || runtime(for: projectID).ownership.hasUnresolvedRun else { return nil }
             return projectID
         }
     }
@@ -824,9 +913,24 @@ final class AppModel {
         }
     }
 
-    func shutdown() async {
+    func shutdown() async -> RuntimeShutdownReport {
+        isShuttingDown = true
+        defer { isShuttingDown = false }
+        runtimeBootstrapGeneration = UUID()
+        runtimeBootstrapTask?.cancel()
+        runtimeBootstrapTask = nil
+        workspaceOperationGeneration = UUID()
+        isWorkspaceOperating = false
         try? captureActiveProjectIDs()
-        await workspaceOrchestration.stopAll()
+        await workspaceOrchestration.cancelCurrentOperation()
+        if runtimeService.managesPersistentRuns, !runtimeBootstrapState.permitsMutation {
+            let report = await runtimeService.reconcile(projects: projects)
+            runtimeReconciliationReport = report
+            for (projectID, state) in await runtimeService.allSnapshots() {
+                receiveRuntime(projectID: projectID, state: state)
+            }
+        }
+        return await runtimeService.stopAllWithReport()
     }
 
     private func reloadPersistence() throws {
@@ -836,6 +940,7 @@ final class AppModel {
         workspace = document.workspace
         projectCount = projects.count
         workspaceCount = workspace.savedWorkspaces.count
+        navigationRouter.revalidate(projects: projects, workspace: workspace)
     }
 
     private func openValidatedLocalURL(_ value: String) {
@@ -844,7 +949,9 @@ final class AppModel {
     }
 
     private func guardActiveProjectMutation(id: String, draft: ProjectDraft) throws {
-        guard runtime(for: id).status.isActive, let saved = project(id: id) else { return }
+        let runtime = runtime(for: id)
+        guard runtime.status.isActive || runtime.ownership.hasUnresolvedRun,
+              let saved = project(id: id) else { return }
         if saved.cwd != draft.cwd.trimmingCharacters(in: .whitespacesAndNewlines)
             || saved.command != draft.command.trimmingCharacters(in: .whitespacesAndNewlines)
             || saved.port != draft.port
@@ -853,66 +960,130 @@ final class AppModel {
         }
     }
 
-    private func connectRuntimeEvents() {
+    private func receiveRuntime(projectID: String, state: RuntimeSnapshot) {
+        let previous = runtimes[projectID]
+        let previousStatus = previous?.status ?? .stopped
+        runtimes[projectID] = state
+        runningProjectCount = runtimes.values.count { $0.status.isActive }
+        if state.status == .ready,
+           previousStatus != .ready,
+           !state.recoveredAfterRelaunch,
+           let runID = state.runID,
+           !openedReadyRunIDs.contains(runID),
+           let project = project(id: projectID), project.openOnReady {
+            openedReadyRunIDs.insert(runID)
+            openValidatedLocalURL(project.url)
+        } else if !state.status.isActive {
+            if let runID = state.runID ?? previous?.runID {
+                openedReadyRunIDs.remove(runID)
+            }
+        }
+    }
+
+    private func scheduleRuntimeBootstrap() {
         let model = self
-        Task { [runtimeService] in
+        let generation = UUID()
+        runtimeBootstrapGeneration = generation
+        runtimeBootstrapTask?.cancel()
+        runtimeBootstrapTask = Task { [runtimeService] in
+            model.runtimeBootstrapState = runtimeService.managesPersistentRuns ? .reconciling : .ready
             await runtimeService.setEventSink { projectID, state in
                 Task { @MainActor [weak model] in
                     model?.receiveRuntime(projectID: projectID, state: state)
                 }
             }
+            let report = await runtimeService.reconcile(projects: model.projects)
+            let snapshots = await runtimeService.allSnapshots()
+            guard !Task.isCancelled,
+                  model.runtimeBootstrapGeneration == generation,
+                  !model.isShuttingDown else { return }
+            for (projectID, state) in snapshots {
+                model.receiveRuntime(projectID: projectID, state: state)
+            }
+            model.runtimeReconciliationReport = report
+            if let ledgerError = report.ledgerError {
+                model.runtimeBootstrapState = .blocked(ledgerError)
+                model.errorMessage = ledgerError
+                return
+            }
+            model.runtimeBootstrapState = .ready
+            await model.autostartAfterReconciliation(bootstrapGeneration: generation)
+            if model.runtimeBootstrapGeneration == generation {
+                model.runtimeBootstrapTask = nil
+            }
         }
     }
 
-    private func receiveRuntime(projectID: String, state: RuntimeSnapshot) {
-        let previousStatus = runtimes[projectID]?.status ?? .stopped
-        runtimes[projectID] = state
-        runningProjectCount = runtimes.values.count { $0.status.isActive }
-        if state.status == .ready,
-           previousStatus != .ready,
-           !openedReadyRunIDs.contains(projectID),
-           let project = project(id: projectID), project.openOnReady {
-            openedReadyRunIDs.insert(projectID)
-            openValidatedLocalURL(project.url)
-        } else if !state.status.isActive {
-            openedReadyRunIDs.remove(projectID)
-        }
-    }
-
-    private func scheduleAutostart() {
-        let ids = projects.filter(\.autostart).map(\.id)
+    private func autostartAfterReconciliation(bootstrapGeneration: UUID) async {
+        guard !Task.isCancelled,
+              runtimeBootstrapGeneration == bootstrapGeneration,
+              !isShuttingDown,
+              !isWorkspaceOperating else { return }
+        let ids = projects.filter {
+            $0.autostart
+                && !runtime(for: $0.id).status.isActive
+                && !runtime(for: $0.id).ownership.hasUnresolvedRun
+        }.map(\.id)
         guard !ids.isEmpty else { return }
         let profile = WorkspaceProfile(
-            id: "native-autostart", name: "Automatic startup", projectIds: ids,
+            id: "__localwrap_internal_autostart__",
+            name: "Automatic startup",
+            projectIds: ids,
             createdAt: "", updatedAt: "", lastStartedAt: nil, source: nil
         )
         var launchWorkspace = workspace
+        launchWorkspace.savedWorkspaces.removeAll { $0.id == profile.id }
         launchWorkspace.savedWorkspaces.append(profile)
-        let model = self
-        Task { [workspaceOrchestration, projects, runtimes] in
-            do {
-                let (diagnosis, operation) = try await workspaceOrchestration.start(
-                    projects: projects,
-                    workspace: launchWorkspace,
-                    target: .profile(profile.id),
-                    startReadyOnly: false
-                )
-                await MainActor.run {
-                    guard !model.isWorkspaceOperating else { return }
-                    model.workspaceDiagnosis = diagnosis
-                    model.workspaceOperation = operation
-                }
-            } catch {
-                await MainActor.run { model.errorMessage = error.localizedDescription }
+        let operationGeneration = UUID()
+        workspaceOperationGeneration = operationGeneration
+        isWorkspaceOperating = true
+        defer {
+            if workspaceOperationGeneration == operationGeneration {
+                isWorkspaceOperating = false
             }
-            _ = runtimes
+        }
+        do {
+            let (diagnosis, operation) = try await workspaceOrchestration.start(
+                projects: projects,
+                workspace: launchWorkspace,
+                target: .profile(profile.id),
+                startReadyOnly: false
+            )
+            guard workspaceOperationGeneration == operationGeneration,
+                  runtimeBootstrapGeneration == bootstrapGeneration,
+                  !isShuttingDown else { return }
+            workspaceDiagnosis = diagnosis
+            workspaceOperation = operation
+        } catch {
+            guard workspaceOperationGeneration == operationGeneration,
+                  runtimeBootstrapGeneration == bootstrapGeneration,
+                  !isShuttingDown else { return }
+            errorMessage = error.localizedDescription
         }
     }
 
     private func captureActiveProjectIDs(fallback: [String] = []) throws {
         guard let store else { return }
         let active = projects.map(\.id).filter { runtimes[$0]?.status.isActive == true }
-        _ = try store.setLastRunningProjectIDs(active.isEmpty ? fallback : active)
+        workspace = try store.setLastRunningProjectIDs(active.isEmpty ? fallback : active)
+        workspaceCount = workspace.savedWorkspaces.count
+    }
+
+    private var runtimeBootstrapMessage: String {
+        switch runtimeBootstrapState {
+        case .ready:
+            "Runtime reconciliation is ready."
+        case .reconciling:
+            "Wait for LocalWrap to finish reconciling previously launched processes."
+        case .blocked(let message):
+            message
+        }
+    }
+
+    private func requireRuntimeBootstrap() throws {
+        guard runtimeControlsAvailable else {
+            throw RuntimeError.reconciliationRequired(runtimeBootstrapMessage)
+        }
     }
 }
 

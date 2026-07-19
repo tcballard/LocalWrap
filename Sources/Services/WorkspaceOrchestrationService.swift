@@ -77,6 +77,18 @@ actor WorkspaceOrchestrationService {
                 continue
             }
             let existing = await runtime.snapshot(for: project.id)
+            guard operationID == currentOperation else { break }
+            if existing.ownership.requiresOwnershipReview {
+                results.append(result(
+                    project,
+                    .blocked,
+                    "runtime-ownership-unresolved",
+                    existing.error
+                        ?? existing.readinessMessage
+                        ?? "Runtime ownership needs review before this project can start."
+                ))
+                continue
+            }
             if existing.status.isActive {
                 if existing.status == .ready { readyIDs.insert(project.id) }
                 results.append(result(
@@ -88,6 +100,7 @@ actor WorkspaceOrchestrationService {
                 continue
             }
             do {
+                guard operationID == currentOperation else { break }
                 _ = try await runtime.start(project)
                 let final = await runtime.waitForReady(
                     projectID: project.id,
@@ -116,6 +129,10 @@ actor WorkspaceOrchestrationService {
     func stopAll() async {
         operationID = nil
         await runtime.stopAll()
+    }
+
+    func cancelCurrentOperation() {
+        operationID = nil
     }
 
     private func snapshots(for projects: [Project]) async -> [String: RuntimeSnapshot] {

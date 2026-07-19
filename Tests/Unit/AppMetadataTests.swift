@@ -6,7 +6,7 @@ final class AppMetadataTests: XCTestCase {
     func testNativeBundleContainsVersionIconAndAboutCredits() throws {
         XCTAssertEqual(
             Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-            "3.3.0"
+            "0.1.1"
         )
         XCTAssertEqual(
             Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String,

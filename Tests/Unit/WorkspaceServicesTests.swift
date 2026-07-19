@@ -150,6 +150,30 @@ final class WorkspaceServicesTests: XCTestCase {
         XCTAssertEqual(summary.results.first { $0.projectID == "docs" }?.status, .started)
     }
 
+    func testCancellationDuringFinalSnapshotPreventsLateStart() async throws {
+        let api = project("api", "API", apiDirectory, 4_000)
+        let gate = WorkspaceSnapshotGate()
+        let runtime = WorkspaceGatedSnapshotRuntime(gate: gate)
+        let service = WorkspaceOrchestrationService(runtime: runtime, doctor: makeDoctor())
+        let operation = Task {
+            try await service.start(
+                projects: [api],
+                workspace: .empty,
+                target: .allProjects,
+                startReadyOnly: false,
+                waitTimeout: .seconds(1)
+            )
+        }
+
+        await gate.waitUntilPaused()
+        await service.cancelCurrentOperation()
+        await gate.resume()
+        _ = try await operation.value
+
+        let startedIDs = await runtime.startedIDs()
+        XCTAssertEqual(startedIDs, [])
+    }
+
     func testOwnActivePortDoesNotProduceBusyWarning() throws {
         let api = project("api", "API", apiDirectory, 4_000)
         let doctor = makeDoctor(portAvailable: false)
@@ -173,7 +197,18 @@ final class WorkspaceServicesTests: XCTestCase {
         let webPort = try ports.suggest(preferred: apiPort + 1)
         let api = project("real-api", "API", sample, apiPort)
         let web = project("real-web", "Web", sample, webPort, dependsOn: [api.id])
-        let runtime = RuntimeService()
+        let ledgerDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LocalWrapWorkspaceRuntimeTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: ledgerDirectory) }
+        let ledger = RuntimeLedgerStore(paths: RuntimeLedgerPaths(
+            directory: ledgerDirectory,
+            ledger: ledgerDirectory.appendingPathComponent("runtime-ledger.json")
+        ))
+        let runtime = RuntimeService(
+            launcher: PosixProcessLauncher(),
+            ledgerStore: ledger,
+            processInspector: DarwinProcessInspector()
+        )
         let service = WorkspaceOrchestrationService(runtime: runtime)
 
         do {
@@ -277,5 +312,68 @@ private actor WorkspaceFakeRuntime: WorkspaceRuntimeControlling {
     }
 
     func stopAll() { states = [:] }
+    func startedIDs() -> [String] { starts }
+}
+
+private actor WorkspaceSnapshotGate {
+    private var isPaused = false
+    private var pauseContinuation: CheckedContinuation<Void, Never>?
+    private var observers: [CheckedContinuation<Void, Never>] = []
+
+    func pause() async {
+        isPaused = true
+        let pending = observers
+        observers.removeAll()
+        pending.forEach { $0.resume() }
+        await withCheckedContinuation { continuation in
+            pauseContinuation = continuation
+        }
+    }
+
+    func waitUntilPaused() async {
+        if isPaused { return }
+        await withCheckedContinuation { continuation in
+            observers.append(continuation)
+        }
+    }
+
+    func resume() {
+        isPaused = false
+        pauseContinuation?.resume()
+        pauseContinuation = nil
+    }
+}
+
+private actor WorkspaceGatedSnapshotRuntime: WorkspaceRuntimeControlling {
+    private let gate: WorkspaceSnapshotGate
+    private var snapshotCount = 0
+    private var starts: [String] = []
+
+    init(gate: WorkspaceSnapshotGate) {
+        self.gate = gate
+    }
+
+    func snapshot(for projectID: String) async -> RuntimeSnapshot {
+        snapshotCount += 1
+        if snapshotCount == 2 {
+            await gate.pause()
+        }
+        return RuntimeSnapshot()
+    }
+
+    func start(_ project: Project) -> RuntimeSnapshot {
+        starts.append(project.id)
+        return RuntimeSnapshot(status: .starting)
+    }
+
+    func waitForReady(
+        projectID: String,
+        timeout: Duration,
+        pollInterval: Duration
+    ) -> RuntimeSnapshot {
+        RuntimeSnapshot(status: .ready)
+    }
+
+    func stopAll() {}
     func startedIDs() -> [String] { starts }
 }

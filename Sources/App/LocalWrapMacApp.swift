@@ -5,6 +5,9 @@ import SwiftUI
 enum LocalWrapEntryPoint {
     @MainActor
     static func main() {
+        if let status = RuntimeSupervisorCommand().run(arguments: CommandLine.arguments) {
+            Darwin.exit(status)
+        }
         if let status = WorkspaceManifestCommand().run(arguments: CommandLine.arguments) {
             Darwin.exit(status)
         }
@@ -14,7 +17,14 @@ enum LocalWrapEntryPoint {
 
 struct LocalWrapMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var appModel = AppModel.forCurrentLaunch()
+    @State private var appModel: AppModel
+
+    @MainActor
+    init() {
+        let model = AppModel.forCurrentLaunch()
+        _appModel = State(initialValue: model)
+        AppModelRegistry.current = model
+    }
 
     var body: some Scene {
         WindowGroup("LocalWrapMac", id: "main") {

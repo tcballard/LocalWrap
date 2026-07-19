@@ -50,6 +50,22 @@ and `2` for invalid command usage. Diagnostics include the affected project or
 workspace, field, and stable validation code; warnings do not make a valid
 manifest fail.
 
+## Crash-safe runtimes
+
+LocalWrap keeps a private, bounded ownership ledger for active projects. Before
+a reviewed command can start, a LocalWrap-owned supervisor establishes a new
+macOS session and process group, its kernel identity is written durably, and
+that identity is checked again. If LocalWrap closes or fails before the commit,
+the project command never starts. After a relaunch, reconciliation runs before
+autostart and classifies each record as exited, verified-owned, unverifiable, or
+conflicting, preventing duplicate or unsafe control.
+
+Closing the main window leaves verified projects running and the menu bar
+available. Quitting stops only freshly re-verified process groups; LocalWrap
+never sends a signal when identity evidence is missing or conflicting. See
+[runtime reconciliation and recovery](Documentation/runtime-reconciliation.md)
+for the persisted fields, recovery behavior, and safety boundary.
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements
