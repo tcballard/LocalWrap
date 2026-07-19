@@ -88,6 +88,29 @@ final class RuntimeServiceTests: XCTestCase {
         XCTAssertEqual(state.logs.last, "line-500")
     }
 
+    func testOutputCallbacksRemainOrderedAheadOfExit() async throws {
+        let launcher = FakeProcessLauncher()
+        let service = RuntimeService(
+            environmentResolver: testEnvironmentResolver(),
+            launcher: launcher,
+            readiness: FixedReadiness(result: true),
+            doctor: makeDoctor(),
+            isDirectory: { _ in true }
+        )
+        let project = makeProject()
+        _ = try await service.start(project)
+        let expected = (0..<100).map { "ordered-\($0)" }
+
+        for line in expected {
+            launcher.process?.emit(line)
+        }
+        launcher.process?.exit(code: 2)
+        let state = await waitForStatus(.failed, projectID: project.id, service: service)
+
+        XCTAssertEqual(state.logs.filter { $0.hasPrefix("ordered-") }, expected)
+        XCTAssertEqual(state.logs.last, "[process exited with code 2]")
+    }
+
     func testLegacyStopFailsClosedWithoutVerifiedOwnership() async throws {
         let launcher = FakeProcessLauncher()
         let service = RuntimeService(
@@ -218,7 +241,7 @@ final class RuntimeServiceTests: XCTestCase {
             cwd: sample.path,
             command: "npm start",
             port: port,
-            url: "http://127.0.0.1:\(port)",
+            url: "http://localhost:\(port)",
             isSample: true,
             createdAt: "2026-07-10T12:00:00Z",
             updatedAt: "2026-07-10T12:00:00Z"

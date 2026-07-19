@@ -1,6 +1,41 @@
 import Darwin
 import Foundation
 
+/// Preserves the order in which a process launcher reports output and exit
+/// callbacks while crossing into RuntimeService's actor isolation.
+private final class OrderedRuntimeCallbacks: @unchecked Sendable {
+    private let lock = NSLock()
+    private var tail: Task<Void, Never>?
+    private let onOutput: @Sendable (String) async -> Void
+    private let onExit: @Sendable (Int32) async -> Void
+
+    init(
+        onOutput: @escaping @Sendable (String) async -> Void,
+        onExit: @escaping @Sendable (Int32) async -> Void
+    ) {
+        self.onOutput = onOutput
+        self.onExit = onExit
+    }
+
+    func receiveOutput(_ line: String) {
+        enqueue { [onOutput] in await onOutput(line) }
+    }
+
+    func receiveExit(_ code: Int32) {
+        enqueue { [onExit] in await onExit(code) }
+    }
+
+    private func enqueue(_ operation: @escaping @Sendable () async -> Void) {
+        lock.withLock {
+            let previous = tail
+            tail = Task {
+                await previous?.value
+                await operation()
+            }
+        }
+    }
+}
+
 actor RuntimeService {
     typealias EventSink = @Sendable (String, RuntimeSnapshot) -> Void
 
@@ -265,28 +300,16 @@ actor RuntimeService {
                     }
 
                     let logURL = try managed.ledger.logURL(for: record.logFilename)
+                    let callbacks = orderedCallbacks(
+                        projectID: project.id,
+                        runID: record.runID
+                    )
                     let process = try managed.launcher.monitorExisting(
                         pid: record.pid,
                         processGroupID: record.processGroupID,
                         logURL: logURL,
-                        onOutput: { [weak self] line in
-                            Task {
-                                await self?.received(
-                                    line: line,
-                                    projectID: project.id,
-                                    runID: record.runID
-                                )
-                            }
-                        },
-                        onExit: { [weak self] code in
-                            Task {
-                                await self?.exited(
-                                    code: code,
-                                    projectID: project.id,
-                                    runID: record.runID
-                                )
-                            }
-                        }
+                        onOutput: callbacks.receiveOutput,
+                        onExit: callbacks.receiveExit
                     )
                     guard process.pid == record.pid,
                           process.processGroupID == record.processGroupID else {
@@ -644,28 +667,13 @@ actor RuntimeService {
         managed: ManagedComponents
     ) throws {
         let logURL = try managed.ledger.logURL(for: record.logFilename)
+        let callbacks = orderedCallbacks(projectID: record.projectID, runID: record.runID)
         let process = try managed.launcher.monitorExisting(
             pid: record.pid,
             processGroupID: record.processGroupID,
             logURL: logURL,
-            onOutput: { [weak self] line in
-                Task {
-                    await self?.received(
-                        line: line,
-                        projectID: record.projectID,
-                        runID: record.runID
-                    )
-                }
-            },
-            onExit: { [weak self] code in
-                Task {
-                    await self?.exited(
-                        code: code,
-                        projectID: record.projectID,
-                        runID: record.runID
-                    )
-                }
-            }
+            onOutput: callbacks.receiveOutput,
+            onExit: callbacks.receiveExit
         )
         guard process.pid == record.pid,
               process.processGroupID == record.processGroupID,
@@ -731,18 +739,15 @@ actor RuntimeService {
             port: project.port,
             readinessURL: readinessURL
         )
+        let callbacks = orderedCallbacks(projectID: project.id, runID: runID)
         let process = try managed.launcher.prepareLaunch(
             executable: executable,
             arguments: arguments,
             environment: environment,
             workingDirectory: URL(fileURLWithPath: project.cwd, isDirectory: true),
             logURL: logURL,
-            onOutput: { [weak self] line in
-                Task { await self?.received(line: line, projectID: project.id, runID: runID) }
-            },
-            onExit: { [weak self] code in
-                Task { await self?.exited(code: code, projectID: project.id, runID: runID) }
-            }
+            onOutput: callbacks.receiveOutput,
+            onExit: callbacks.receiveExit
         )
 
         var candidateRecord: RuntimeLedgerRecord?
@@ -917,17 +922,14 @@ actor RuntimeService {
         environment: [String: String],
         readinessURL: URL
     ) throws -> RuntimeSnapshot {
+        let callbacks = orderedCallbacks(projectID: project.id, runID: runID)
         let process = try launcher.launch(
             executable: executable,
             arguments: arguments,
             environment: environment,
             workingDirectory: URL(fileURLWithPath: project.cwd, isDirectory: true),
-            onOutput: { [weak self] line in
-                Task { await self?.received(line: line, projectID: project.id, runID: runID) }
-            },
-            onExit: { [weak self] code in
-                Task { await self?.exited(code: code, projectID: project.id, runID: runID) }
-            }
+            onOutput: callbacks.receiveOutput,
+            onExit: callbacks.receiveExit
         )
         let started = startedState(state, pid: process.pid, ownership: .none)
         states[project.id] = started
@@ -1283,6 +1285,17 @@ actor RuntimeService {
         state.appendLog(line)
         states[projectID] = state
         publish(projectID)
+    }
+
+    private func orderedCallbacks(projectID: String, runID: String) -> OrderedRuntimeCallbacks {
+        OrderedRuntimeCallbacks(
+            onOutput: { [weak self] line in
+                await self?.received(line: line, projectID: projectID, runID: runID)
+            },
+            onExit: { [weak self] code in
+                await self?.exited(code: code, projectID: projectID, runID: runID)
+            }
+        )
     }
 
     private func exited(code: Int32, projectID: String, runID: String) {
