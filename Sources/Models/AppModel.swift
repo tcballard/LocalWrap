@@ -1,6 +1,12 @@
 import Foundation
 import Observation
 
+private struct AttentionRefreshPayload: Sendable {
+    let attention: AttentionInput
+    let projectPolicies: [String: MenuProjectValidatedPolicy]
+    let workspacePolicies: [WorkspaceTarget: MenuWorkspaceValidatedPolicy]
+}
+
 @MainActor
 @Observable
 final class AppModel {
@@ -24,8 +30,11 @@ final class AppModel {
     var releaseNotice: ReleaseNotice?
     var selectedWorkspaceTarget: WorkspaceTarget?
     var errorMessage: String?
+    private(set) var menuActionFailureRevision: UInt64 = 0
     private(set) var repositoryOpenProposal: RepositoryOpenProposal?
     let navigationRouter: NavigationRouter
+    let launchAtLoginService: LaunchAtLoginService
+    let runtimeNotificationService: RuntimeNotificationService
 
     var repositoryProposal: RepositoryProposal? {
         guard case .project(let proposal) = repositoryOpenProposal else { return nil }
@@ -42,6 +51,7 @@ final class AppModel {
     private let workspacePacks: WorkspacePackService
     private let attentionService: AttentionService
     private let runHistoryCoordinator: RunHistoryCoordinator?
+    private let menuCommandCenterService: MenuCommandCenterService
     private let diagnosticNow: @Sendable () -> String
     private let releaseChecker: ReleaseCheckService
     private let currentVersion: @Sendable () -> String
@@ -53,7 +63,7 @@ final class AppModel {
     private var runtimeBootstrapGeneration = UUID()
     private var runtimeBootstrapTask: Task<Void, Never>?
     private var attentionRefreshTask: Task<Void, Never>?
-    private var attentionDiagnosisTask: Task<AttentionInput?, Never>?
+    private var attentionDiagnosisTask: Task<AttentionRefreshPayload?, Never>?
     private var attentionRefreshGeneration = UUID()
     private var attentionRefreshRevision: UInt64 = 0
     private var workspaceOperationGeneration = UUID()
@@ -61,6 +71,10 @@ final class AppModel {
     private var retainedWorkspaceOperationOrder: [WorkspaceTarget]
     private var runHistoryCaptures: [String: RunHistoryCapture]
     private var runHistoryTask: Task<Void, Never>?
+    private var menuProjectPolicies: [String: MenuProjectValidatedPolicy]
+    private var menuWorkspacePolicies: [WorkspaceTarget: MenuWorkspaceValidatedPolicy]
+    private var runtimeNotificationObservationTask: Task<Void, Never>?
+    private var runtimeNotificationObservationRevision: UInt64 = 0
     private var isShuttingDown = false
 
     init(
@@ -76,6 +90,8 @@ final class AppModel {
         initialAttentionSnapshot: AttentionSnapshot = .empty,
         initialPreviewFailures: [String: PreviewState] = [:],
         initialRunHistoryDocument: RunHistoryDocument = .empty,
+        initialMenuProjectPolicies: [String: MenuProjectValidatedPolicy] = [:],
+        initialMenuWorkspacePolicies: [WorkspaceTarget: MenuWorkspaceValidatedPolicy] = [:],
         store: ProjectStore? = nil,
         runtimeService: RuntimeService = RuntimeService(),
         doctorService: ProjectDoctorService = ProjectDoctorService(),
@@ -86,6 +102,9 @@ final class AppModel {
         workspacePacks: WorkspacePackService = WorkspacePackService(),
         attentionService: AttentionService = AttentionService(),
         runHistoryCoordinator: RunHistoryCoordinator? = nil,
+        menuCommandCenterService: MenuCommandCenterService = MenuCommandCenterService(),
+        launchAtLoginService: LaunchAtLoginService? = nil,
+        runtimeNotificationService: RuntimeNotificationService? = nil,
         diagnosticNow: @escaping @Sendable () -> String = {
             ISO8601DateFormatter().string(from: Date())
         },
@@ -139,6 +158,9 @@ final class AppModel {
         self.workspacePacks = workspacePacks
         self.attentionService = attentionService
         self.runHistoryCoordinator = runHistoryCoordinator
+        self.menuCommandCenterService = menuCommandCenterService
+        self.launchAtLoginService = launchAtLoginService ?? .inactive()
+        self.runtimeNotificationService = runtimeNotificationService ?? .inactive()
         self.diagnosticNow = diagnosticNow
         self.releaseChecker = releaseChecker
         self.currentVersion = currentVersion
@@ -157,8 +179,11 @@ final class AppModel {
         retainedWorkspaceOperations = [:]
         retainedWorkspaceOperationOrder = []
         runHistoryCaptures = [:]
+        menuProjectPolicies = initialMenuProjectPolicies
+        menuWorkspacePolicies = initialMenuWorkspacePolicies
         scheduleAttentionRefresh(immediate: true)
         scheduleRunHistoryLoad()
+        scheduleRuntimeNotificationObservation()
     }
 
     static func live(
@@ -172,6 +197,8 @@ final class AppModel {
         workspacePacks: WorkspacePackService = WorkspacePackService(),
         attentionService: AttentionService = AttentionService(),
         runHistoryCoordinator: RunHistoryCoordinator? = nil,
+        launchAtLoginService: LaunchAtLoginService? = nil,
+        runtimeNotificationService: RuntimeNotificationService? = nil,
         sessionStore: SessionStateStore = SessionStateStore(),
         releaseChecker: ReleaseCheckService = ReleaseCheckService(),
         currentVersion: @escaping @Sendable () -> String = {
@@ -196,6 +223,8 @@ final class AppModel {
                 workspacePacks: workspacePacks,
                 attentionService: attentionService,
                 runHistoryCoordinator: runHistoryCoordinator,
+                launchAtLoginService: launchAtLoginService,
+                runtimeNotificationService: runtimeNotificationService,
                 releaseChecker: releaseChecker,
                 currentVersion: currentVersion,
                 navigationRouter: NavigationRouter(
@@ -223,6 +252,8 @@ final class AppModel {
                 workspacePacks: workspacePacks,
                 attentionService: attentionService,
                 runHistoryCoordinator: runHistoryCoordinator,
+                launchAtLoginService: launchAtLoginService,
+                runtimeNotificationService: runtimeNotificationService,
                 releaseChecker: releaseChecker,
                 currentVersion: currentVersion
             )
@@ -444,6 +475,8 @@ final class AppModel {
                 initialRuntimes: [
                     id: RuntimeSnapshot(
                         status: .ready,
+                        runID: "ui-preview-run",
+                        ownership: .verified(runID: "ui-preview-run"),
                         readinessMessage: "Ready for preview."
                     ),
                 ],
@@ -484,12 +517,30 @@ final class AppModel {
         #endif
         return live(
             runtimeService: .live(),
-            runHistoryCoordinator: RunHistoryCoordinator()
+            runHistoryCoordinator: RunHistoryCoordinator(),
+            launchAtLoginService: LaunchAtLoginService(),
+            runtimeNotificationService: RuntimeNotificationService()
         )
     }
 
     var menuStatusSummary: String {
         MenuStatusFormatter.summary(running: runningProjectCount, saved: projectCount)
+    }
+
+    /// A pure projection over current state plus policies prepared by the
+    /// background diagnosis batch. Reading this property never touches the
+    /// filesystem, parses a URL, or invokes either Doctor service.
+    var menuCommandCenterSnapshot: MenuCommandCenterSnapshot {
+        menuCommandCenterService.snapshot(MenuCommandCenterInput(
+            projects: projects,
+            runtimes: runtimes,
+            policies: menuProjectPolicies,
+            workspacePolicies: menuWorkspacePolicies,
+            workspace: workspace,
+            attention: attentionSnapshot,
+            permitsRuntimeMutation: runtimeControlsAvailable,
+            workspaceOperationInProgress: isWorkspaceOperating
+        ))
     }
 
     var runtimeControlsAvailable: Bool {
@@ -504,6 +555,237 @@ final class AppModel {
 
     var activeProjects: [Project] {
         projects.filter { runtime(for: $0.id).status.isActive }
+    }
+
+    func requestStartProject(id: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await startProject(id: id)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func requestRestartProject(id: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await restartProject(id: id)
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func executeMenuPrimaryAction(_ requested: MenuCommandCenterPrimaryAction) {
+        let current = menuCommandCenterSnapshot
+        guard current.primaryAction == requested else {
+            rejectStaleMenuAction()
+            return
+        }
+
+        switch requested.kind {
+        case .reviewFailure:
+            if let issueID = requested.attentionIssueID,
+               let issue = attentionSnapshot.issues.first(where: { $0.id == issueID }) {
+                openAttentionIssue(issue)
+            } else if let target = requested.reviewTarget {
+                navigationRouter.showAttentionTarget(target)
+            } else {
+                navigationRouter.show(.attention)
+            }
+            errorMessage = nil
+
+        case .openReadyApps:
+            if !openMenuProjectURLs(requested.projectIDs) {
+                reportMenuActionFailure("No validated ready app is available to open.")
+            }
+
+        case .resume:
+            performMenuWorkspaceStart(target: .lastRunning)
+        }
+    }
+
+    func executeMenuProjectAction(projectID: String, action: MenuProjectAction) {
+        let current = menuCommandCenterSnapshot
+        guard let actions = current.quickActions(for: projectID) else {
+            rejectStaleMenuAction()
+            return
+        }
+        let capability = menuCapability(action, in: actions)
+        guard capability.isEnabled else {
+            reportMenuActionFailure(
+                capability.disabledReason ?? "This action is no longer available."
+            )
+            return
+        }
+
+        switch action {
+        case .start:
+            requestMenuStartProject(id: projectID)
+        case .stop:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                errorMessage = nil
+                await stopProject(id: projectID)
+                let state = runtime(for: projectID)
+                if let message = errorMessage
+                    ?? (state.status == .failed
+                        ? state.error ?? state.readinessMessage ?? "The app could not be stopped safely."
+                        : nil) {
+                    reportMenuActionFailure(message)
+                }
+            }
+        case .restart:
+            requestMenuRestartProject(id: projectID)
+        case .open:
+            if !openMenuProjectURLs([projectID]) {
+                reportMenuActionFailure("This app is no longer ready to open.")
+            }
+        case .review:
+            if let issue = attentionSnapshot.issues.first(where: {
+                if case .project(let id, _) = $0.scope { return id == projectID }
+                return false
+            }) {
+                openAttentionIssue(issue)
+            } else {
+                navigationRouter.showAttentionTarget(
+                    .project(projectID: projectID, surface: .runtime)
+                )
+            }
+        }
+    }
+
+    func executeMenuWorkspaceAction(_ action: MenuWorkspaceAction) {
+        let actions = menuCommandCenterSnapshot.workspaceQuickActions
+        let capability: MenuActionCapability
+        switch action {
+        case .resume:
+            capability = actions.resume
+        case .startAll:
+            capability = actions.startAll
+        case .stopAll:
+            capability = actions.stopAll
+        case .openReadyApps:
+            capability = actions.openReadyApps
+        case .startSavedProfile(let profileID):
+            guard let saved = actions.savedWorkspaces.first(where: {
+                $0.profileID == profileID
+            }) else {
+                rejectStaleMenuAction()
+                return
+            }
+            capability = saved.start
+        }
+        guard capability.isEnabled else {
+            reportMenuActionFailure(
+                capability.disabledReason ?? "This action is no longer available."
+            )
+            return
+        }
+
+        switch action {
+        case .resume:
+            performMenuWorkspaceStart(target: .lastRunning)
+        case .startAll:
+            performMenuWorkspaceStart(target: .allProjects)
+        case .stopAll:
+            performMenuStopAll()
+        case .openReadyApps:
+            if !openMenuProjectURLs(actions.readyProjectIDs) {
+                reportMenuActionFailure("No validated ready app is available to open.")
+            }
+        case .startSavedProfile(let profileID):
+            performMenuWorkspaceStart(target: .profile(profileID))
+        }
+    }
+
+    func openMenuAttentionItem(_ requested: MenuCommandCenterItem) {
+        let current = menuCommandCenterSnapshot.visibleGroups
+            .flatMap(\.items)
+            .first { $0.id == requested.id }
+        guard let current else {
+            rejectStaleMenuAction()
+            return
+        }
+        if let issueID = current.attentionIssueID,
+           let issue = attentionSnapshot.issues.first(where: { $0.id == issueID }) {
+            openAttentionIssue(issue)
+        } else if let target = current.reviewTarget {
+            navigationRouter.showAttentionTarget(target)
+        } else {
+            navigationRouter.show(.attention)
+        }
+        errorMessage = nil
+    }
+
+    func showMenuOverflow() {
+        navigationRouter.show(attentionSnapshot.issues.isEmpty ? .projects : .attention)
+    }
+
+    func setLaunchAtLoginEnabled(_ enabled: Bool) {
+        switch launchAtLoginService.setEnabled(enabled) {
+        case .success:
+            errorMessage = nil
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func openLaunchAtLoginSettings() {
+        launchAtLoginService.openSystemSettings()
+    }
+
+    func setRuntimeNotificationsEnabled(_ enabled: Bool) async {
+        await runtimeNotificationService.setOptedIn(enabled)
+        if let error = runtimeNotificationService.lastError {
+            errorMessage = error.localizedDescription
+        } else {
+            errorMessage = nil
+        }
+        scheduleRuntimeNotificationObservation()
+    }
+
+    func openRuntimeNotificationSettings() {
+        desktopActions.openNotificationSettings()
+    }
+
+    func refreshAmbientServices() {
+        launchAtLoginService.refresh()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await runtimeNotificationService.refreshAuthorization()
+            if let error = runtimeNotificationService.lastError {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    func handleNotificationResponse(identifier: String) {
+        guard case .project(let projectID, _) = runtimeNotificationService
+            .navigationTarget(forNotificationIdentifier: identifier) else {
+            return
+        }
+        let currentRuntime = runtime(for: projectID)
+        if currentRuntime.status == .failed,
+           runtimeNotificationService.notificationEventMatchesCurrentRuntime(
+               identifier: identifier,
+               projectID: projectID,
+               runtime: currentRuntime
+           ),
+           let issue = attentionSnapshot.issues.first(where: {
+               guard $0.sources.contains(.runtime),
+                     case .project(let issueProjectID, _) = $0.scope else { return false }
+               return issueProjectID == projectID
+           }) {
+            openAttentionIssue(issue)
+        } else {
+            navigationRouter.showAttentionTarget(
+                .project(projectID: projectID, surface: .runtime)
+            )
+        }
     }
 
     func project(id: String) -> Project? {
@@ -987,6 +1269,9 @@ final class AppModel {
         isWorkspaceOperating = true
         await workspaceOrchestration.stopAll()
         guard workspaceOperationGeneration == generation else { return }
+        for (projectID, state) in await runtimeService.allSnapshots() {
+            receiveRuntime(projectID: projectID, state: state)
+        }
         isWorkspaceOperating = false
         workspaceOperation = nil
         scheduleAttentionRefresh(immediate: true)
@@ -1097,7 +1382,11 @@ final class AppModel {
 
     func shutdown() async -> RuntimeShutdownReport {
         isShuttingDown = true
-        defer { isShuttingDown = false }
+        defer {
+            isShuttingDown = false
+            scheduleAttentionRefresh(immediate: true)
+            scheduleRuntimeNotificationObservation()
+        }
         runtimeBootstrapGeneration = UUID()
         runtimeBootstrapTask?.cancel()
         runtimeBootstrapTask = nil
@@ -1108,10 +1397,15 @@ final class AppModel {
         pendingAttentionDiagnosis?.cancel()
         attentionRefreshTask = nil
         attentionDiagnosisTask = nil
+        runtimeNotificationObservationRevision &+= 1
+        let pendingNotificationObservation = runtimeNotificationObservationTask
+        pendingNotificationObservation?.cancel()
+        runtimeNotificationObservationTask = nil
         workspaceOperationGeneration = UUID()
         isWorkspaceOperating = false
         await pendingAttentionRefresh?.value
         _ = await pendingAttentionDiagnosis?.value
+        await pendingNotificationObservation?.value
         try? captureActiveProjectIDs()
         await workspaceOrchestration.cancelCurrentOperation()
         if runtimeService.managesPersistentRuns, !runtimeBootstrapState.permitsMutation {
@@ -1158,13 +1452,129 @@ final class AppModel {
         let projectIDs = Set(projects.map(\.id))
         previewFailures = previewFailures.filter { projectIDs.contains($0.key) }
         pruneRetainedWorkspaceOperations(projectIDs: projectIDs)
+        menuProjectPolicies = menuProjectPolicies.filter { projectIDs.contains($0.key) }
+        menuWorkspacePolicies = [:]
         navigationRouter.revalidate(projects: projects, workspace: workspace)
         scheduleAttentionRefresh()
+        scheduleRuntimeNotificationObservation()
     }
 
     private func openValidatedLocalURL(_ value: String) {
         guard let url = LocalURLValidator().url(from: value) else { return }
         desktopActions.openURL(url)
+    }
+
+    @discardableResult
+    private func openMenuProjectURLs(_ projectIDs: [String]) -> Bool {
+        var visited = Set<String>()
+        var openedAny = false
+        for projectID in projectIDs where visited.insert(projectID).inserted {
+            guard let project = project(id: projectID),
+                  runtime(for: projectID).status == .ready,
+                  menuProjectPolicies[projectID]?.canOpenValidatedLocalURL == true else {
+                continue
+            }
+            openValidatedLocalURL(project.url)
+            openedAny = true
+        }
+        return openedAny
+    }
+
+    private func menuCapability(
+        _ action: MenuProjectAction,
+        in actions: MenuProjectQuickActions
+    ) -> MenuActionCapability {
+        switch action {
+        case .start: actions.start
+        case .stop: actions.stop
+        case .restart: actions.restart
+        case .open: actions.open
+        case .review: actions.review
+        }
+    }
+
+    private func rejectStaleMenuAction() {
+        reportMenuActionFailure(
+            "LocalWrap changed since the menu opened. Review the current state and try again."
+        )
+    }
+
+    private func reportMenuActionFailure(_ message: String) {
+        errorMessage = message
+        menuActionFailureRevision &+= 1
+    }
+
+    private func requestMenuStartProject(id: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.startProject(id: id)
+            } catch {
+                self.reportMenuActionFailure(error.localizedDescription)
+            }
+        }
+    }
+
+    private func requestMenuRestartProject(id: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.restartProject(id: id)
+            } catch {
+                self.reportMenuActionFailure(error.localizedDescription)
+            }
+        }
+    }
+
+    private func performMenuWorkspaceStart(target: WorkspaceTarget) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.errorMessage = nil
+            await self.startWorkspace(target: target, readyOnly: false)
+            if let message = self.errorMessage {
+                self.reportMenuActionFailure(message)
+            } else if let failure = self.workspaceOperation?.unresolvedResults.first {
+                self.reportMenuActionFailure(failure.message)
+            }
+        }
+    }
+
+    private func performMenuStopAll() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.errorMessage = nil
+            await self.stopAllProjects()
+            if let message = self.errorMessage {
+                self.reportMenuActionFailure(message)
+            } else if let failed = self.runtimes.values.first(where: {
+                $0.status == .failed || $0.ownership.requiresOwnershipReview
+            }) {
+                self.reportMenuActionFailure(
+                    failed.error
+                        ?? failed.readinessMessage
+                        ?? "One or more apps could not be stopped safely."
+                )
+            }
+        }
+    }
+
+    private func scheduleRuntimeNotificationObservation() {
+        guard !isShuttingDown else { return }
+        runtimeNotificationObservationRevision &+= 1
+        let revision = runtimeNotificationObservationRevision
+        let previous = runtimeNotificationObservationTask
+        let projectsSnapshot = projects
+        let runtimesSnapshot = runtimes
+        let service = runtimeNotificationService
+
+        runtimeNotificationObservationTask = Task { @MainActor [weak self] in
+            await previous?.value
+            guard !Task.isCancelled,
+                  let self,
+                  self.runtimeNotificationObservationRevision == revision,
+                  !self.isShuttingDown else { return }
+            await service.observe(projects: projectsSnapshot, runtimes: runtimesSnapshot)
+        }
     }
 
     private func guardActiveProjectMutation(id: String, draft: ProjectDraft) throws {
@@ -1214,6 +1624,7 @@ final class AppModel {
             || resolvedWorkspaceFailure {
             scheduleAttentionRefresh()
         }
+        scheduleRuntimeNotificationObservation()
     }
 
     private func scheduleRuntimeBootstrap() {
@@ -1594,17 +2005,23 @@ final class AppModel {
                   self.attentionRefreshGeneration == generation,
                   !self.isShuttingDown else { return }
 
-            let diagnosisTask = Task.detached(priority: .utility) { () -> AttentionInput? in
+            let diagnosisTask = Task.detached(priority: .utility) {
+                () -> AttentionRefreshPayload? in
                 guard !Task.isCancelled else { return nil }
-                let knownProjectIDs = Set(projectsSnapshot.map(\.id))
+                let boundedProjects = Array(
+                    projectsSnapshot.prefix(AttentionService.maximumProjects)
+                )
+                let knownProjectIDs = Set(boundedProjects.map(\.id))
                 let attentionRuntimes = runtimesSnapshot.filter {
                     knownProjectIDs.contains($0.key) || $0.value.ownership.hasUnresolvedRun
                 }
                 guard !Task.isCancelled else { return nil }
 
                 var diagnoses: [String: ProjectDiagnosis] = [:]
-                diagnoses.reserveCapacity(projectsSnapshot.count)
-                for project in projectsSnapshot {
+                var projectPolicies: [String: MenuProjectValidatedPolicy] = [:]
+                diagnoses.reserveCapacity(boundedProjects.count)
+                projectPolicies.reserveCapacity(boundedProjects.count)
+                for project in boundedProjects {
                     guard !Task.isCancelled else { return nil }
                     let runtime = runtimesSnapshot[project.id] ?? RuntimeSnapshot()
                     let runtimeDiagnosis = runtime.diagnosis
@@ -1614,34 +2031,77 @@ final class AppModel {
                         : doctor.diagnose(ProjectDraft(project: project))
                     guard !Task.isCancelled else { return nil }
                     diagnoses[project.id] = diagnosis
+                    projectPolicies[project.id] = makeMenuProjectPolicy(
+                        project: project,
+                        runtime: runtime,
+                        diagnosis: diagnosis
+                    )
                 }
 
                 guard !Task.isCancelled else { return nil }
-                let workspaceDiagnoses: [WorkspaceDiagnosis]
-                if let diagnosis = try? workspaceDoctor.diagnose(
-                    projects: projectsSnapshot,
-                    workspace: workspaceSnapshot,
-                    target: .allProjects,
-                    runtimes: runtimesSnapshot
+                var requestedTargets: [(WorkspaceTarget, [String])] = [
+                    (.allProjects, boundedProjects.map(\.id)),
+                ]
+                let lastRunningIDs = workspaceSnapshot.lastRunningProjectIds.filter {
+                    knownProjectIDs.contains($0)
+                }
+                if !workspaceSnapshot.lastRunningProjectIds.isEmpty {
+                    requestedTargets.append((.lastRunning, lastRunningIDs))
+                }
+                for profile in MenuCommandCenterService.profilesRequiringPolicy(
+                    workspaceSnapshot.savedWorkspaces
                 ) {
-                    workspaceDiagnoses = [diagnosis]
-                } else {
-                    workspaceDiagnoses = []
+                    requestedTargets.append((
+                        .profile(profile.id),
+                        profile.projectIds.filter { knownProjectIDs.contains($0) }
+                    ))
+                }
+
+                var workspaceDiagnoses: [WorkspaceDiagnosis] = []
+                var workspacePolicies: [WorkspaceTarget: MenuWorkspaceValidatedPolicy] = [:]
+                for (target, expectedProjectIDs) in requestedTargets {
+                    guard !Task.isCancelled else { return nil }
+                    do {
+                        let diagnosis = try workspaceDoctor.diagnose(
+                            projects: boundedProjects,
+                            workspace: workspaceSnapshot,
+                            target: target,
+                            runtimes: runtimesSnapshot
+                        )
+                        if target == .allProjects {
+                            workspaceDiagnoses = [diagnosis]
+                        }
+                        workspacePolicies[target] = makeMenuWorkspacePolicy(
+                            target: target,
+                            expectedProjectIDs: expectedProjectIDs,
+                            diagnosis: diagnosis
+                        )
+                    } catch {
+                        workspacePolicies[target] = MenuWorkspaceValidatedPolicy(
+                            target: target,
+                            projectIDs: expectedProjectIDs,
+                            validation: .blocked(.validationPending)
+                        )
+                    }
                 }
                 guard !Task.isCancelled else { return nil }
 
-                return AttentionInput(
-                    projects: projectsSnapshot,
-                    runtimes: attentionRuntimes,
-                    projectDiagnoses: diagnoses,
-                    workspaceDiagnoses: workspaceDiagnoses,
-                    workspaceOperations: operationSnapshots,
-                    previews: previewSnapshot,
-                    runtimeReconciliation: reconciliationSnapshot
+                return AttentionRefreshPayload(
+                    attention: AttentionInput(
+                        projects: boundedProjects,
+                        runtimes: attentionRuntimes,
+                        projectDiagnoses: diagnoses,
+                        workspaceDiagnoses: workspaceDiagnoses,
+                        workspaceOperations: operationSnapshots,
+                        previews: previewSnapshot,
+                        runtimeReconciliation: reconciliationSnapshot
+                    ),
+                    projectPolicies: projectPolicies,
+                    workspacePolicies: workspacePolicies
                 )
             }
             self.attentionDiagnosisTask = diagnosisTask
-            guard let input = await diagnosisTask.value else {
+            guard let payload = await diagnosisTask.value else {
                 if self.attentionRefreshGeneration == generation {
                     self.attentionDiagnosisTask = nil
                 }
@@ -1654,11 +2114,13 @@ final class AppModel {
             guard !Task.isCancelled,
                   self.attentionRefreshGeneration == generation,
                   !self.isShuttingDown else { return }
-            let snapshot = await service.update(input, revision: revision)
+            let snapshot = await service.update(payload.attention, revision: revision)
             guard !Task.isCancelled,
                   self.attentionRefreshGeneration == generation,
                   !self.isShuttingDown else { return }
             self.attentionSnapshot = snapshot
+            self.menuProjectPolicies = payload.projectPolicies
+            self.menuWorkspacePolicies = payload.workspacePolicies
         }
     }
 
@@ -1695,6 +2157,97 @@ final class AppModel {
         guard runtimeControlsAvailable else {
             throw RuntimeError.reconciliationRequired(runtimeBootstrapMessage)
         }
+    }
+}
+
+private func makeMenuProjectPolicy(
+    project: Project,
+    runtime: RuntimeSnapshot,
+    diagnosis: ProjectDiagnosis
+) -> MenuProjectValidatedPolicy {
+    let configuration: MenuProjectConfigurationPolicy
+    if let failure = diagnosis.validation.errors.first {
+        configuration = .invalid(firstFailureField: failure.field)
+    } else if let failedCheck = diagnosis.checks.first(where: { $0.status == .fail }),
+              let field = menuProjectField(for: failedCheck.id) {
+        configuration = .invalid(firstFailureField: field)
+    } else {
+        configuration = .valid
+    }
+
+    let signalling: MenuRuntimeSignallingCapability
+    switch runtime.ownership {
+    case .none:
+        signalling = .unavailable(.noOwnedProcess)
+    case .reconciling:
+        signalling = .unavailable(.reconciling)
+    case .verified(let runID):
+        signalling = runtime.runID == runID
+            ? .verified(runID: runID)
+            : .unavailable(.runIdentityChanged)
+    case .unverifiable:
+        signalling = .unavailable(.ownershipUnverifiable)
+    case .conflicting:
+        signalling = .unavailable(.ownershipConflict)
+    }
+
+    return MenuProjectValidatedPolicy(
+        projectID: project.id,
+        configuration: configuration,
+        canOpenValidatedLocalURL: LocalURLValidator().url(from: project.url) != nil,
+        signalling: signalling
+    )
+}
+
+private func makeMenuWorkspacePolicy(
+    target: WorkspaceTarget,
+    expectedProjectIDs: [String],
+    diagnosis: WorkspaceDiagnosis
+) -> MenuWorkspaceValidatedPolicy {
+    let validation: MenuWorkspaceValidationState
+    if Set(diagnosis.target.projectIDs) != Set(expectedProjectIDs) {
+        validation = .blocked(.validationPending)
+    } else {
+        switch diagnosis.status {
+        case .empty:
+            validation = .blocked(.noProjects)
+        case .ready, .attention:
+            validation = .ready
+        case .blocked:
+            let reason = diagnosis.checks
+                .first(where: { $0.status == .fail })
+                .map { menuWorkspaceBlockReason(for: $0.id) }
+                ?? .configuration
+            validation = .blocked(reason)
+        }
+    }
+    return MenuWorkspaceValidatedPolicy(
+        target: target,
+        projectIDs: expectedProjectIDs,
+        validation: validation
+    )
+}
+
+private func menuProjectField(for check: DoctorCheckID) -> ProjectField? {
+    switch check {
+    case .directory: .cwd
+    case .command: .command
+    case .dependencies: .dependencies
+    case .port: .port
+    case .url: .url
+    case .process, .readiness: nil
+    }
+}
+
+private func menuWorkspaceBlockReason(
+    for check: WorkspaceCheckID
+) -> MenuWorkspaceValidationBlockReason {
+    switch check {
+    case .projects, .directories, .commands: .configuration
+    case .startup, .dependencies: .dependencies
+    case .environment: .environment
+    case .ports: .ports
+    case .urls: .urls
     }
 }
 

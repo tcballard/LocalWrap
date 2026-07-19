@@ -45,12 +45,24 @@ struct LocalWrapMacApp: App {
             WorkspaceMenuCommands()
         }
 
-        MenuBarExtra("LocalWrapMac", image: "MenuBarIcon") {
+        MenuBarExtra {
             MenuBarContentView(
                 showMainWindow: appDelegate.showMainWindow,
                 showAboutPanel: appDelegate.showAboutPanel
             )
                 .environment(appModel)
+        } label: {
+            MenuBarStatusIcon(snapshot: appModel.menuCommandCenterSnapshot)
+                .onChange(of: appModel.menuActionFailureRevision) { _, _ in
+                    appDelegate.showMainWindow()
+                }
         }
+        .menuBarExtraStyle(.menu)
+
+        Settings {
+            AmbientSettingsView()
+                .environment(appModel)
+        }
+        .defaultSize(width: 520, height: 480)
     }
 }
