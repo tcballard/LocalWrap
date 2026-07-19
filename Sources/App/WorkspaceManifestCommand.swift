@@ -1,10 +1,10 @@
 import Foundation
 
 struct WorkspaceManifestCommand {
-    typealias Reviewer = (URL, URL?) throws -> ReviewedWorkspacePack
+    typealias Inspector = (URL, URL?) throws -> WorkspacePackReview
     typealias Output = (String) -> Void
 
-    private let reviewer: Reviewer
+    private let inspector: Inspector
     private let output: Output
     private let errorOutput: Output
     private let fileManager: FileManager
@@ -15,8 +15,8 @@ struct WorkspaceManifestCommand {
         errorOutput: @escaping Output = WorkspaceManifestCommand.standardError,
         fileManager: FileManager = .default
     ) {
-        reviewer = { rootURL, packURL in
-            try workspacePacks.review(rootURL: rootURL, packURL: packURL)
+        inspector = { rootURL, packURL in
+            try workspacePacks.inspect(rootURL: rootURL, packURL: packURL)
         }
         self.output = output
         self.errorOutput = errorOutput
@@ -24,12 +24,12 @@ struct WorkspaceManifestCommand {
     }
 
     init(
-        reviewer: @escaping Reviewer,
+        inspector: @escaping Inspector,
         output: @escaping Output,
         errorOutput: @escaping Output,
         fileManager: FileManager = .default
     ) {
-        self.reviewer = reviewer
+        self.inspector = inspector
         self.output = output
         self.errorOutput = errorOutput
         self.fileManager = fileManager
@@ -47,7 +47,20 @@ struct WorkspaceManifestCommand {
         let location = validationLocation(for: inputURL)
 
         do {
-            let pack = try reviewer(location.rootURL, location.packURL)
+            let review = try inspector(location.rootURL, location.packURL)
+            for warning in review.warnings {
+                errorOutput(diagnostic("Warning", issue: warning))
+            }
+            if !review.blockers.isEmpty {
+                for blocker in review.blockers {
+                    errorOutput(diagnostic("Blocker", issue: blocker))
+                }
+                return 1
+            }
+            guard let pack = review.pack else {
+                errorOutput("Invalid LocalWrap workspace manifest: validation produced no importable manifest.")
+                return 1
+            }
             output("Valid LocalWrap workspace manifest")
             output("Manifest: \(pack.packURL.path)")
             output("Workspace: \(pack.name)")
@@ -58,6 +71,11 @@ struct WorkspaceManifestCommand {
             errorOutput("Invalid LocalWrap workspace manifest: \(error.localizedDescription)")
             return 1
         }
+    }
+
+    private func diagnostic(_ label: String, issue: WorkspacePackReviewIssue) -> String {
+        let location = issue.field.map { "\(issue.scope).\($0)" } ?? issue.scope
+        return "\(label) [\(issue.code)] \(location): \(issue.message)"
     }
 
     private func resolvedURL(for argument: String) -> URL {

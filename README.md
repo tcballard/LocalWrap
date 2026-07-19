@@ -38,6 +38,18 @@ credentials, and tokens. See the
 [workspace manifest v1 guide](Documentation/workspace-manifest-v1.md) and its
 [JSON Schema](Documentation/schema/workspace-manifest-v1.schema.json).
 
+Validate a repository or manifest without importing, saving, or starting
+anything:
+
+```bash
+/Applications/LocalWrap.app/Contents/MacOS/LocalWrap validate-manifest .
+```
+
+The validator exits `0` for a valid manifest, `1` when review finds blockers,
+and `2` for invalid command usage. Diagnostics include the affected project or
+workspace, field, and stable validation code; warnings do not make a valid
+manifest fail.
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements

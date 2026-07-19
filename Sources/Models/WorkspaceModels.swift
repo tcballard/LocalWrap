@@ -276,6 +276,8 @@ struct WorkspacePackReviewProject: Identifiable, Equatable, Sendable {
     let command: String
     let port: Int
     let url: String
+    let autostart: Bool
+    let openOnReady: Bool
     let dependsOn: [String]
     let healthCheck: HealthCheck?
 }

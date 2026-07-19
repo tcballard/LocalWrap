@@ -46,6 +46,5 @@ struct WelcomeDetailView: View {
             }
         }
         .padding(48)
-        .accessibilityIdentifier("welcomeDetail")
     }
 }

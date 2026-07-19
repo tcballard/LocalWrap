@@ -56,7 +56,7 @@ final class WorkspaceManifestCommandTests: XCTestCase {
         let command = makeCommand(recorder: recorder) { rootURL, packURL in
             reviewedRoot = rootURL
             reviewedManifest = packURL
-            return try WorkspacePackService().review(rootURL: rootURL, packURL: packURL)
+            return try WorkspacePackService().inspect(rootURL: rootURL, packURL: packURL)
         }
 
         XCTAssertEqual(command.run(arguments: ["LocalWrap", "validate-manifest", manifest.path]), 0)
@@ -95,8 +95,47 @@ final class WorkspaceManifestCommandTests: XCTestCase {
 
         XCTAssertEqual(command.run(arguments: ["LocalWrap", "validate-manifest", root.path]), 1)
         XCTAssertTrue(recorder.output.isEmpty)
+        XCTAssertFalse(recorder.errors.isEmpty)
+        XCTAssertTrue(recorder.errors.contains { $0.contains("Blocker [command-invalid] Project app.command:") })
+    }
+
+    func testValidManifestReportsScopedWarningsWithoutFailing() throws {
+        let root = try makeWorkspace(url: "http://localhost:3001")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let recorder = OutputRecorder()
+        let command = WorkspaceManifestCommand(
+            output: { recorder.output.append($0) },
+            errorOutput: { recorder.errors.append($0) }
+        )
+
+        XCTAssertEqual(command.run(arguments: ["LocalWrap", "validate-manifest", root.path]), 0)
+        XCTAssertEqual(recorder.output.first, "Valid LocalWrap workspace manifest")
         XCTAssertEqual(recorder.errors.count, 1)
-        XCTAssertTrue(recorder.errors[0].hasPrefix("Invalid LocalWrap workspace manifest:"))
+        XCTAssertTrue(recorder.errors[0].contains("Warning [url-port-mismatch] Project app.url:"))
+    }
+
+    func testAllBlockersAreScopedAndSecretValuesAreNotEchoed() throws {
+        let root = try makeWorkspace(command: "bash private-command", url: "https://example.com:3000")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let manifest = root.appendingPathComponent(".localwrap/workspace.json")
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifest)) as? [String: Any]
+        )
+        object["environment"] = ["TOKEN": "private-token-value"]
+        try JSONSerialization.data(withJSONObject: object).write(to: manifest)
+        let recorder = OutputRecorder()
+        let command = WorkspaceManifestCommand(
+            output: { recorder.output.append($0) },
+            errorOutput: { recorder.errors.append($0) }
+        )
+
+        XCTAssertEqual(command.run(arguments: ["LocalWrap", "validate-manifest", root.path]), 1)
+        XCTAssertTrue(recorder.output.isEmpty)
+        XCTAssertTrue(recorder.errors.contains { $0.contains("[command-invalid] Project app.command:") })
+        XCTAssertTrue(recorder.errors.contains { $0.contains("[url-invalid] Project app.url:") })
+        XCTAssertTrue(recorder.errors.contains { $0.contains("[sensitive-field-unsupported] Manifest.environment:") })
+        XCTAssertFalse(recorder.errors.joined().contains("private-token-value"))
+        XCTAssertFalse(recorder.errors.joined().contains("private-command"))
     }
 
     func testMalformedAndNonObjectJSONExitWithCodeOneWithoutEchoingContents() throws {
@@ -114,23 +153,26 @@ final class WorkspaceManifestCommandTests: XCTestCase {
             XCTAssertEqual(command.run(arguments: ["LocalWrap", "validate-manifest", root.path]), 1)
             XCTAssertTrue(recorder.output.isEmpty)
             XCTAssertEqual(recorder.errors.count, 1)
-            XCTAssertTrue(recorder.errors[0].hasPrefix("Invalid LocalWrap workspace manifest:"))
-            XCTAssertFalse(recorder.errors[0].contains("private-value"))
+            XCTAssertTrue(recorder.errors[0].hasPrefix("Blocker [manifest-invalid] Manifest:"))
+            XCTAssertFalse(recorder.errors.joined().contains("private-value"))
         }
     }
 
     private func makeCommand(
         recorder: OutputRecorder,
-        reviewer: @escaping WorkspaceManifestCommand.Reviewer
+        inspector: @escaping WorkspaceManifestCommand.Inspector
     ) -> WorkspaceManifestCommand {
         WorkspaceManifestCommand(
-            reviewer: reviewer,
+            inspector: inspector,
             output: { recorder.output.append($0) },
             errorOutput: { recorder.errors.append($0) }
         )
     }
 
-    private func makeWorkspace(command: String = "npm run dev") throws -> URL {
+    private func makeWorkspace(
+        command: String = "npm run dev",
+        url: String? = nil
+    ) throws -> URL {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("WorkspaceManifestCommand-\(UUID().uuidString)", isDirectory: true)
         let project = root.appendingPathComponent("app", isDirectory: true)
@@ -140,15 +182,17 @@ final class WorkspaceManifestCommandTests: XCTestCase {
             at: manifest.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        var projectPayload: [String: Any] = [
+            "id": "app",
+            "path": "app",
+            "command": command,
+            "port": 3_000,
+        ]
+        if let url { projectPayload["url"] = url }
         let payload: [String: Any] = [
             "localwrap": 1,
             "name": "CLI Fixture",
-            "projects": [[
-                "id": "app",
-                "path": "app",
-                "command": command,
-                "port": 3_000,
-            ]],
+            "projects": [projectPayload],
         ]
         try JSONSerialization.data(withJSONObject: payload).write(to: manifest)
         return root

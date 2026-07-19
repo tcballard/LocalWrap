@@ -10,6 +10,8 @@ struct LocalURLValidator: Sendable {
               let host = components.host?.lowercased()
                 .trimmingCharacters(in: CharacterSet(charactersIn: "[]")),
               Self.allowedHosts.contains(host),
+              components.user == nil,
+              components.password == nil,
               let port = components.port,
               (1_000...65_535).contains(port) else {
             return false

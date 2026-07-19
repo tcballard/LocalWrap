@@ -102,7 +102,7 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(model.runtime(for: model.projects[0].id).status, .stopped)
     }
 
-    func testManifestImportDoesNotMutateRunningProjectConfiguration() throws {
+    func testManifestImportDoesNotMutateRunningProjectConfiguration() async throws {
         let fixture = try makeFixture(name: "RunningManifestImport")
         defer { try? FileManager.default.removeItem(at: fixture.root) }
         let packURL = fixture.projectDirectory.appendingPathComponent("localwrap.json")
@@ -119,17 +119,39 @@ final class AppModelTests: XCTestCase {
             projects: first.projects,
             workspace: first.workspace
         )
+        let recorder = DesktopRecorder()
         let model = AppModel(
             projects: first.projects,
             workspace: first.workspace,
             initialRuntimes: [project.id: RuntimeSnapshot(status: .ready)],
             store: fixture.store,
+            desktopActions: DesktopActionService(
+                revealFolder: { recorder.recordFolder($0) },
+                copyText: { recorder.recordText($0) },
+                openURL: { _ in }
+            ),
             workspacePacks: packs
         )
 
+        model.revealWorkspaceManifest(updateReview)
+        model.copyWorkspaceManifestPath(updateReview)
+        model.reviewWorkspaceManifestAgain(updateReview)
+        XCTAssertEqual(recorder.folder?.path, packURL.path)
+        XCTAssertEqual(recorder.text, packURL.path)
+        guard case .workspace = model.repositoryOpenProposal else {
+            return XCTFail("Review Again should refresh the workspace proposal.")
+        }
+        XCTAssertEqual(
+            model.workspacePackImportBlockReason(for: updateReview),
+            "Stop these projects before importing configuration changes: app."
+        )
+        XCTAssertEqual(model.workspacePackActiveUpdateProjectIDs(for: updateReview), [project.id])
         XCTAssertFalse(model.importWorkspacePack(updateReview))
         XCTAssertTrue(model.errorMessage?.contains("Stop these projects") == true)
         XCTAssertEqual(try fixture.store.project(id: project.id)?.command, "npm start")
+
+        await model.stopProjectsBlockingWorkspacePackImport(updateReview)
+        XCTAssertNil(model.workspacePackImportBlockReason(for: updateReview))
     }
 
     func testLiveModelLoadsPersistedCounts() throws {

@@ -68,6 +68,20 @@ The machine-readable schema is
 The schema validates JSON structure; LocalWrap also performs filesystem,
 command, dependency, health-check, and loopback URL validation during review.
 
+## Validate without importing
+
+The installed app includes a read-only validator for local checks and CI:
+
+```bash
+/Applications/LocalWrap.app/Contents/MacOS/LocalWrap validate-manifest .
+```
+
+Pass either a repository folder or a manifest path. Validation does not save
+configuration, import projects, or execute commands. Exit code `0` means the
+manifest is valid, `1` means review found blockers, and `2` means the command
+was used incorrectly. Warnings are printed with their stable code and scoped
+field but do not make an otherwise valid manifest fail.
+
 ## Root fields
 
 | Field | Required | Meaning |

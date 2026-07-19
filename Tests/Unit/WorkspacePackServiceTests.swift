@@ -26,7 +26,7 @@ final class WorkspacePackServiceTests: XCTestCase {
             at: packURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
-        let json = #"{"localwrap":1,"name":"Acme","projects":[{"id":"Web App","path":"apps/web","command":"npm run dev","port":5173,"dependsOn":["API Service"],"healthCheck":{"path":"/health"}},{"id":"API Service","path":"services/api","command":"node server.js","port":4000}],"workspaces":[{"name":"Full Stack","projects":["API Service","Web App"]}]}"#
+        let json = #"{"localwrap":1,"name":"Acme","projects":[{"id":"Web App","path":"apps/web","command":"npm run dev","port":5173,"autostart":true,"openOnReady":false,"dependsOn":["API Service"],"healthCheck":{"path":"/health"}},{"id":"API Service","path":"services/api","command":"node server.js","port":4000}],"workspaces":[{"name":"Full Stack","projects":["API Service","Web App"]}]}"#
         try Data(json.utf8).write(to: packURL)
         let service = WorkspacePackService()
 
@@ -35,6 +35,9 @@ final class WorkspacePackServiceTests: XCTestCase {
         XCTAssertEqual(reviewed.projects.map(\.id), ["web-app", "api-service"])
         XCTAssertEqual(reviewed.projects[0].draft.dependsOn, ["api-service"])
         XCTAssertEqual(reviewed.profiles[0].projectIDs, ["api-service", "web-app"])
+        let inspected = try service.inspect(rootURL: root)
+        XCTAssertTrue(inspected.projects[0].autostart)
+        XCTAssertFalse(inspected.projects[0].openOnReady)
 
         let projects = reviewed.projects.enumerated().map { index, imported -> Project in
             Project(
@@ -104,7 +107,6 @@ final class WorkspacePackServiceTests: XCTestCase {
         ]
         try JSONSerialization.data(withJSONObject: payload).write(to: packURL)
         let service = WorkspacePackService()
-        let reviewed = try service.review(rootURL: root)
         let paths = ProjectStorePaths(
             directory: root.appendingPathComponent("store", isDirectory: true),
             store: root.appendingPathComponent("store/store.json"),
@@ -118,9 +120,21 @@ final class WorkspacePackServiceTests: XCTestCase {
             makeID: { ids.next() ?? UUID().uuidString }
         )
 
-        let first = try service.importReviewed(reviewed, into: store)
+        let initial = try store.load()
+        let firstReview = try service.inspect(
+            rootURL: root,
+            projects: initial.projects,
+            workspace: initial.workspace
+        )
+        let first = try service.importReviewed(firstReview, into: store)
         _ = try store.markWorkspaceStarted(id: first.workspace.savedWorkspaces[0].id)
-        let second = try service.importReviewed(reviewed, into: store)
+        let current = try store.load()
+        let secondReview = try service.inspect(
+            rootURL: root,
+            projects: current.projects,
+            workspace: current.workspace
+        )
+        let second = try service.importReviewed(secondReview, into: store)
 
         XCTAssertEqual(second.projects.count, 1)
         XCTAssertEqual(second.projects[0].id, first.projects[0].id)
@@ -422,6 +436,282 @@ final class WorkspacePackServiceTests: XCTestCase {
         XCTAssertEqual(reviewed.projects.map(\.id), ["api", "web"])
         XCTAssertEqual(reviewed.projects.first(where: { $0.id == "web" })?.draft.dependsOn, ["api"])
         XCTAssertEqual(try Data(contentsOf: packURL), try service.canonicalData(for: first.pack))
+    }
+
+    func testInspectionBlocksExplicitEmptyStringsButPreservesOmittedDefaults() throws {
+        let review = try inspectPayload([
+            "localwrap": 1,
+            "name": "   ",
+            "projects": [[
+                "id": "",
+                "name": "  ",
+                "path": "",
+                "command": "npm start",
+                "url": "   ",
+            ]],
+            "workspaces": [[
+                "id": " ",
+                "name": "",
+                "projects": ["project-1"],
+            ]],
+        ])
+        let codes = Set(review.blockers.map(\.code))
+
+        XCTAssertNil(review.pack)
+        XCTAssertEqual(codes.intersection([
+            "manifest-name-empty",
+            "project-id-empty",
+            "project-name-empty",
+            "project-path-empty",
+            "project-url-empty",
+            "workspace-id-empty",
+            "workspace-name-empty",
+        ]), [
+            "manifest-name-empty",
+            "project-id-empty",
+            "project-name-empty",
+            "project-path-empty",
+            "project-url-empty",
+            "workspace-id-empty",
+            "workspace-name-empty",
+        ])
+
+        let omitted = try inspectPayload([
+            "localwrap": 1,
+            "projects": [["command": "npm start"]],
+        ])
+        XCTAssertTrue(omitted.canImport)
+        XCTAssertEqual(omitted.projects[0].id, "project-1")
+        XCTAssertEqual(omitted.projects[0].name, "project-1")
+        XCTAssertEqual(omitted.projects[0].path, ".")
+        XCTAssertEqual(omitted.projects[0].url, "http://localhost:3000")
+    }
+
+    func testInspectionBlocksOverlongExplicitIdentifiersAndReferences() throws {
+        let longID = String(repeating: "x", count: 129)
+        let review = try inspectPayload([
+            "localwrap": 1,
+            "projects": [
+                [
+                    "id": longID,
+                    "path": "apps/web",
+                    "command": "npm start",
+                    "port": 3_000,
+                ],
+                [
+                    "id": "api",
+                    "path": "services/api",
+                    "command": "node server.js",
+                    "port": 4_000,
+                    "dependsOn": [longID],
+                ],
+            ],
+            "workspaces": [[
+                "id": longID,
+                "projects": [longID, "api"],
+            ]],
+        ])
+        let codes = Set(review.blockers.map(\.code))
+
+        XCTAssertNil(review.pack)
+        XCTAssertTrue(codes.isSuperset(of: [
+            "project-id-too-long",
+            "dependency-reference-too-long",
+            "workspace-id-too-long",
+            "workspace-project-reference-too-long",
+        ]))
+    }
+
+    func testInspectionBlocksDuplicateNormalizedReferencesInsteadOfSilentlyDeduplicating() throws {
+        let review = try inspectPayload([
+            "localwrap": 1,
+            "projects": [
+                [
+                    "id": "web",
+                    "path": "apps/web",
+                    "command": "npm start",
+                    "port": 3_000,
+                    "dependsOn": ["api", " api "],
+                ],
+                [
+                    "id": "api",
+                    "path": "services/api",
+                    "command": "node server.js",
+                    "port": 4_000,
+                ],
+            ],
+            "workspaces": [[
+                "id": "stack",
+                "projects": ["web", " web "],
+            ]],
+        ])
+
+        XCTAssertNil(review.pack)
+        XCTAssertTrue(review.blockers.contains { $0.code == "duplicate-dependency-reference" })
+        XCTAssertTrue(review.blockers.contains { $0.code == "duplicate-workspace-project-reference" })
+        XCTAssertEqual(review.projects.first(where: { $0.id == "web" })?.dependsOn, ["api"])
+        XCTAssertEqual(review.profiles.first?.projectIDs, ["web"])
+    }
+
+    func testInspectionOrdersIssuesAndChangesDeterministically() throws {
+        let review = try inspectPayload([
+            "localwrap": 1,
+            "projects": [
+                ["id": "delta", "path": ".", "command": "npm start", "port": 3_000],
+                ["id": "charlie", "path": ".", "command": "npm start", "port": 3_000, "url": "http://localhost:3001"],
+                ["id": "bravo", "path": "services/api", "command": "node server.js", "port": 4_000],
+                ["id": "alpha", "path": "apps/web", "command": "npm start", "port": 4_000],
+            ],
+        ])
+        let issueKeys = review.issues.map {
+            [
+                $0.severity == .blocker ? "0" : "1",
+                $0.scope,
+                $0.field ?? "",
+                $0.code,
+                $0.message,
+            ].joined(separator: "\u{0}")
+        }
+        let changeKeys = review.changes.map {
+            [
+                $0.entity == .project ? "0" : "1",
+                $0.entityID,
+                $0.name,
+                $0.disposition.rawValue,
+                $0.existingSavedID ?? "",
+            ].joined(separator: "\u{0}")
+        }
+
+        XCTAssertEqual(issueKeys, issueKeys.sorted())
+        XCTAssertEqual(changeKeys, changeKeys.sorted())
+        XCTAssertEqual(review, try inspectPayload([
+            "localwrap": 1,
+            "projects": [
+                ["id": "delta", "path": ".", "command": "npm start", "port": 3_000],
+                ["id": "charlie", "path": ".", "command": "npm start", "port": 3_000, "url": "http://localhost:3001"],
+                ["id": "bravo", "path": "services/api", "command": "node server.js", "port": 4_000],
+                ["id": "alpha", "path": "apps/web", "command": "npm start", "port": 4_000],
+            ],
+        ]))
+    }
+
+    func testSensitiveFieldsAndURLUserInfoNeverAppearInReviewDiagnostics() throws {
+        let secretValues = [
+            "root-secret-value",
+            "project-secret-value",
+            "health-secret-value",
+            "workspace-secret-value",
+            "alice",
+            "url-password",
+            "bob",
+            "health-password",
+            "executable-secret-value",
+        ]
+        let review = try inspectPayload([
+            "localwrap": 1,
+            "token": secretValues[0],
+            "projects": [[
+                "id": "web",
+                "path": "apps/web",
+                "command": "executable-secret-value --serve",
+                "port": 3_000,
+                "url": "http://alice:url-password@localhost:3000",
+                "environment": ["VALUE": secretValues[1]],
+                "healthCheck": [
+                    "url": "http://bob:health-password@localhost:3000/ready",
+                    "authorization": secretValues[2],
+                ],
+            ]],
+            "workspaces": [[
+                "id": "default",
+                "projects": ["web"],
+                "cookies": secretValues[3],
+            ]],
+        ])
+
+        XCTAssertNil(review.pack)
+        XCTAssertEqual(review.blockers.count { $0.code == "sensitive-field-unsupported" }, 4)
+        XCTAssertTrue(review.blockers.contains { $0.code == "command-invalid" })
+        XCTAssertTrue(review.blockers.contains { $0.code == "url-invalid" })
+        XCTAssertTrue(review.blockers.contains { $0.code == "health-check-invalid" })
+        XCTAssertEqual(review.projects.first?.url, "http://localhost:3000")
+        XCTAssertEqual(review.projects.first?.healthCheck?.url, "http://localhost:3000/ready")
+
+        let visibleReview = String(reflecting: review)
+        for secret in secretValues {
+            XCTAssertFalse(visibleReview.contains(secret), "Review leaked \(secret)")
+        }
+    }
+
+    func testInspectionReportsExactPathSafetyCodesAndAcceptsInternalSymlinks() throws {
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("WorkspacePackOutside-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+
+        let absolute = try inspectPayload([
+            "localwrap": 1,
+            "projects": [["id": "web", "path": outside.path, "command": "npm start"]],
+        ])
+        XCTAssertEqual(absolute.blockers.filter { $0.field == "path" }.map(\.code), ["absolute-project-path"])
+
+        let traversal = try inspectPayload([
+            "localwrap": 1,
+            "projects": [["id": "web", "path": "../outside", "command": "npm start"]],
+        ])
+        XCTAssertEqual(traversal.blockers.filter { $0.field == "path" }.map(\.code), ["project-path-escape"])
+
+        let internalLink = root.appendingPathComponent("internal-link")
+        try FileManager.default.createSymbolicLink(at: internalLink, withDestinationURL: web)
+        let internalReview = try inspectPayload([
+            "localwrap": 1,
+            "projects": [["id": "web", "path": "internal-link", "command": "npm start"]],
+        ])
+        XCTAssertTrue(internalReview.canImport)
+        XCTAssertEqual(internalReview.projects.first?.path, "apps/web")
+
+        let escapingLink = root.appendingPathComponent("escaping-link")
+        try FileManager.default.createSymbolicLink(at: escapingLink, withDestinationURL: outside)
+        let escaping = try inspectPayload([
+            "localwrap": 1,
+            "projects": [["id": "web", "path": "escaping-link", "command": "npm start"]],
+        ])
+        XCTAssertEqual(escaping.blockers.filter { $0.field == "path" }.map(\.code), ["project-path-escape"])
+    }
+
+    func testInspectionBlocksEveryInvalidHealthCheckShapeWithoutImportPayload() throws {
+        let invalidHealthChecks: [[String: Any]] = [
+            ["path": "/ready", "url": "http://localhost:3000/ready"],
+            [:],
+            ["path": "ready"],
+            ["url": "https://example.com:3000/ready"],
+        ]
+
+        for healthCheck in invalidHealthChecks {
+            let review = try inspectPayload([
+                "localwrap": 1,
+                "projects": [[
+                    "id": "web",
+                    "path": "apps/web",
+                    "command": "npm start",
+                    "healthCheck": healthCheck,
+                ]],
+            ])
+
+            XCTAssertNil(review.pack)
+            XCTAssertFalse(review.canImport)
+            XCTAssertEqual(
+                review.blockers.filter { $0.field == "healthCheck" }.map(\.code),
+                ["health-check-invalid"]
+            )
+        }
+    }
+
+    private func inspectPayload(_ payload: [String: Any]) throws -> WorkspacePackReview {
+        let packURL = root.appendingPathComponent("localwrap.json")
+        try JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys])
+            .write(to: packURL)
+        return try WorkspacePackService().inspect(rootURL: root)
     }
 
     private func review(
