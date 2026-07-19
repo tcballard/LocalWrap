@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="${LOCALWRAP_VERSION:-3.3.0}"
+VERSION="${LOCALWRAP_VERSION:-0.1.1}"
 BUILD_ROOT="${LOCALWRAP_RELEASE_DIR:-$ROOT/.build/LocalWrapMac-Signed}"
 ARCHIVE="$BUILD_ROOT/LocalWrap.xcarchive"
 APP="$ARCHIVE/Products/Applications/LocalWrap.app"
