@@ -178,6 +178,28 @@ final class PreviewTests: XCTestCase {
         XCTAssertTrue(state.hasLoadedContent)
     }
 
+    func testAttentionFailureEvidenceExcludesOrdinaryWebViewStateNoise() {
+        let url = URL(string: "http://localhost:3000")!
+        var state = PreviewState()
+        state.open(url)
+        XCTAssertNil(state.attentionFailureEvidence)
+
+        state.markFailed("Connection lost")
+        let failure = state.attentionFailureEvidence
+
+        state.pageTitle = "A later title"
+        state.estimatedProgress = 0.75
+        state.canGoBack = true
+        state.reload()
+        XCTAssertEqual(state.attentionFailureEvidence, failure)
+
+        state.markFailed("Connection refused")
+        XCTAssertNotEqual(state.attentionFailureEvidence, failure)
+
+        state.markLoading()
+        XCTAssertNil(state.attentionFailureEvidence)
+    }
+
     func testViewportPresetsExposeStableResponsiveWidths() {
         XCTAssertEqual(PreviewViewportPreset.allCases, [.fit, .compact, .tablet, .desktop])
         XCTAssertNil(PreviewViewportPreset.fit.width)

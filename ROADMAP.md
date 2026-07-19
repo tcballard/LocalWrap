@@ -19,7 +19,7 @@ application is inspected, and its public behavior is documented.
 | 2. Open Repository | In review | Repository inspection contract |
 | 3. Repository manifest | In review | Open Repository review flow |
 | 4. Runtime reconciliation | In review | Process ownership ledger |
-| 5. Needs Attention | Planned | Reconciled runtime and Doctor issues |
+| 5. Needs Attention | In review | Reconciled runtime and Doctor issues |
 | 6. Menu-bar command center | Planned | Runtime reconciliation and Needs Attention |
 
 ## Product boundaries

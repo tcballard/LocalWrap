@@ -1,5 +1,6 @@
 enum AppSelection: Hashable {
     case welcome
+    case attention
     case workspaces
     case workspace(WorkspaceTarget)
     case projects

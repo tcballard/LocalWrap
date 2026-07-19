@@ -4,6 +4,7 @@ struct ProjectEditorView: View {
     @Environment(AppModel.self) private var appModel
     let project: Project?
     let runtime: RuntimeSnapshot
+    let attentionRequest: AttentionNavigationRequest?
     @Binding var selection: AppSelection?
     @Binding private var externalDirty: Bool
 
@@ -16,16 +17,21 @@ struct ProjectEditorView: View {
     @State private var autostart: Bool
     @State private var openOnReady: Bool
     @State private var diagnosis = ProjectDiagnosis.notChecked()
+    @State private var doctorExpansionRequestID: UUID?
+    @State private var highlightedDoctorCheck: DoctorCheckID?
     @FocusState private var focusedField: ProjectField?
+    @AccessibilityFocusState private var accessibilityFocusedField: ProjectField?
 
     init(
         project: Project?,
         runtime: RuntimeSnapshot = RuntimeSnapshot(),
+        attentionRequest: AttentionNavigationRequest? = nil,
         selection: Binding<AppSelection?>,
         isDirty: Binding<Bool> = .constant(false)
     ) {
         self.project = project
         self.runtime = runtime
+        self.attentionRequest = attentionRequest
         _selection = selection
         _externalDirty = isDirty
         let initial = project.map(ProjectDraft.init(project:)) ?? ProjectDraft(
@@ -67,26 +73,31 @@ struct ProjectEditorView: View {
                 fieldRow(.name) {
                     TextField("Name", text: $name)
                         .focused($focusedField, equals: .name)
+                        .accessibilityFocused($accessibilityFocusedField, equals: .name)
                         .accessibilityIdentifier("projectNameField")
                 }
                 fieldRow(.cwd) {
                     TextField("Working Directory", text: $cwd)
                         .focused($focusedField, equals: .cwd)
+                        .accessibilityFocused($accessibilityFocusedField, equals: .cwd)
                         .accessibilityIdentifier("projectDirectoryField")
                 }
                 fieldRow(.command) {
                     TextField("Command", text: $command)
                         .focused($focusedField, equals: .command)
+                        .accessibilityFocused($accessibilityFocusedField, equals: .command)
                         .accessibilityIdentifier("projectCommandField")
                 }
                 fieldRow(.port) {
                     TextField("Port", value: $port, format: .number.grouping(.never))
                         .focused($focusedField, equals: .port)
+                        .accessibilityFocused($accessibilityFocusedField, equals: .port)
                         .accessibilityIdentifier("projectPortField")
                 }
                 fieldRow(.url) {
                     TextField("URL", text: $url)
                         .focused($focusedField, equals: .url)
+                        .accessibilityFocused($accessibilityFocusedField, equals: .url)
                         .accessibilityIdentifier("projectURLField")
                 }
                 Toggle("Start automatically", isOn: $autostart)
@@ -121,7 +132,17 @@ struct ProjectEditorView: View {
                         || runtime.status.isActive
                         || runtime.ownership.hasUnresolvedRun
                 ),
-                perform: performDoctorAction
+                expansionRequestID: doctorExpansionRequestID,
+                highlightedCheck: highlightedDoctorCheck,
+                perform: performDoctorAction,
+                buildReport: {
+                    appModel.buildDoctorReport(
+                        draft: draft,
+                        existingID: project?.id,
+                        diagnosis: effectiveDiagnosis
+                    )
+                },
+                copyReport: appModel.copyDoctorReport
             )
         }
         .frame(maxWidth: 760, alignment: .leading)
@@ -132,6 +153,9 @@ struct ProjectEditorView: View {
         }
         .onChange(of: isDirty, initial: true) { _, dirty in
             externalDirty = dirty
+        }
+        .task(id: attentionRequest?.id) {
+            handleAttentionRequest()
         }
         .navigationTitle(project?.name ?? "Add Project")
     }
@@ -180,6 +204,7 @@ struct ProjectEditorView: View {
                     .accessibilityIdentifier("\(field.rawValue)ValidationMessage")
             }
         }
+        .id("projectField-\(field.rawValue)")
     }
 
     private func save(start: Bool) {
@@ -216,6 +241,33 @@ struct ProjectEditorView: View {
                 baseline = patched
             }
             diagnosis = appModel.diagnose(patched)
+        }
+    }
+
+    private func handleAttentionRequest() {
+        guard let project,
+              let request = attentionRequest,
+              case .project(let requestedProjectID, let surface) = request.target,
+              requestedProjectID == project.id else { return }
+
+        switch surface {
+        case .field(let field):
+            if field == .dependencies {
+                highlightedDoctorCheck = .dependencies
+                doctorExpansionRequestID = request.id
+                return
+            }
+            focusedField = field
+            accessibilityFocusedField = field
+        case .doctor(let check, let suggestedAction):
+            highlightedDoctorCheck = check
+            doctorExpansionRequestID = request.id
+            if suggestedAction == .revealCommand {
+                focusedField = .command
+                accessibilityFocusedField = .command
+            }
+        case .runtime, .preview:
+            break
         }
     }
 

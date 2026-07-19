@@ -21,6 +21,7 @@ enum StableAppSelection: Codable, Equatable, Sendable {
     static let maximumIdentifierByteCount = 128
 
     case welcome
+    case attention
     case workspaces
     case workspaceProfile(String)
     case lastRunning
@@ -32,6 +33,7 @@ enum StableAppSelection: Codable, Equatable, Sendable {
         guard let selection else { return nil }
         switch selection {
         case .welcome: self = .welcome
+        case .attention: self = .attention
         case .workspaces: self = .workspaces
         case .workspace(.profile(let id)): self = .workspaceProfile(id)
         case .workspace(.lastRunning): self = .lastRunning
@@ -45,6 +47,7 @@ enum StableAppSelection: Codable, Equatable, Sendable {
     var appSelection: AppSelection {
         switch self {
         case .welcome: .welcome
+        case .attention: .attention
         case .workspaces: .workspaces
         case .workspaceProfile(let id): .workspace(.profile(id))
         case .lastRunning: .workspace(.lastRunning)
@@ -59,7 +62,7 @@ enum StableAppSelection: Codable, Equatable, Sendable {
         switch self {
         case .workspaceProfile(let value), .project(let value):
             identifier = value
-        case .welcome, .workspaces, .lastRunning, .allProjects, .projects:
+        case .welcome, .attention, .workspaces, .lastRunning, .allProjects, .projects:
             identifier = nil
         }
         guard let identifier else { return true }
@@ -159,7 +162,7 @@ struct SessionStateStore {
             return projects.isEmpty ? .welcome : selection
         case .newProject:
             return projects.isEmpty ? .welcome : .projects
-        case .welcome, .workspaces, .projects:
+        case .welcome, .attention, .workspaces, .projects:
             return selection
         }
     }

@@ -33,6 +33,8 @@ final class LocalWrapMacUITests: XCTestCase {
         let doctorPanel = app.descendants(matching: .any)["projectDoctorPanel"]
         XCTAssertTrue(doctorPanel.waitForExistence(timeout: 2))
         app.scrollViews.firstMatch.scroll(byDeltaX: 0, deltaY: 500)
+        XCTAssertFalse(app.descendants(matching: .any)["doctorSummary"].exists)
+        doctorPanel.click()
         XCTAssertTrue(
             app.descendants(matching: .any)["doctorSummary"].waitForExistence(timeout: 2)
         )
@@ -53,9 +55,10 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(allProjects.waitForExistence(timeout: 5))
         allProjects.click()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["workspaceDoctorPanel"].waitForExistence(timeout: 3)
-        )
+        let workspaceDoctor = app.descendants(matching: .any)["workspaceDoctorPanel"]
+        XCTAssertTrue(workspaceDoctor.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.descendants(matching: .any)["workspaceDoctorCheck-projects"].exists)
+        workspaceDoctor.click()
         for check in [
             "projects", "startup", "directories", "commands",
             "dependencies", "environment", "ports", "urls",
@@ -209,6 +212,17 @@ final class LocalWrapMacUITests: XCTestCase {
             ].exists
         )
         XCTAssertFalse(app.buttons["startProjectButton"].isEnabled)
+
+        let attentionRow = app.descendants(matching: .any)["attentionSidebarRow"]
+        XCTAssertTrue(attentionRow.waitForExistence(timeout: 3))
+        attentionRow.click()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["attentionDetail"].waitForExistence(timeout: 3)
+        )
+        let ownershipIssue = app.staticTexts["Runtime identity conflicts with the saved record"]
+        XCTAssertTrue(ownershipIssue.waitForExistence(timeout: 3))
+        ownershipIssue.click()
+        XCTAssertTrue(app.descendants(matching: .any)["projectStatus"].waitForExistence(timeout: 3))
     }
 
     func testStandardAboutPanelUsesNativeBundleMetadata() {

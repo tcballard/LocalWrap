@@ -60,7 +60,7 @@ enum DoctorActionID: String, CaseIterable, Equatable, Sendable {
         case .findFreePort: "Find Free Port"
         case .syncURL: "Sync URL"
         case .revealFolder: "Reveal Folder"
-        case .copyReport: "Copy Report"
+        case .copyReport: "Copy Redacted Report"
         case .revealCommand: "Reveal Command"
         }
     }
@@ -74,7 +74,7 @@ enum DoctorActionID: String, CaseIterable, Equatable, Sendable {
     static let revealDirectory = DoctorActionID.revealFolder
 }
 
-enum ProjectField: String, Equatable, Sendable {
+enum ProjectField: String, Equatable, Hashable, Sendable {
     case name
     case cwd
     case command
@@ -198,11 +198,22 @@ struct ProjectDiagnosis: Equatable, Sendable {
     }
 }
 
+/// One immutable, redacted artifact shared by the preview and clipboard paths.
+/// Keeping both views on the same value prevents a later diagnosis refresh from
+/// changing what leaves LocalWrap after the user has reviewed it.
+struct DoctorReport: Equatable, Sendable {
+    let text: String
+
+    var previewText: String { text }
+    var copyText: String { text }
+}
+
 enum DoctorError: Error, Equatable, LocalizedError {
     case unknownAction(String)
     case invalidAvailablePort
     case activeProject
     case dirtyProject
+    case reportPreviewRequired
 
     var errorDescription: String? {
         switch self {
@@ -210,6 +221,8 @@ enum DoctorError: Error, Equatable, LocalizedError {
         case .invalidAvailablePort: "Project Doctor could not find a valid available port."
         case .activeProject: "Stop the project before applying a saved Doctor fix."
         case .dirtyProject: "Save or discard your edits before applying a saved Doctor fix."
+        case .reportPreviewRequired:
+            "Preview the exact redacted report before copying it."
         }
     }
 }

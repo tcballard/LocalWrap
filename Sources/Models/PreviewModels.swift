@@ -64,6 +64,13 @@ struct PreviewWebSnapshot: Equatable, Sendable {
     }
 }
 
+/// The only Live Preview state that can change Needs Attention. Navigation
+/// tokens, progress, titles, and history controls are deliberately excluded.
+struct PreviewFailureEvidence: Equatable, Sendable {
+    let currentURL: String?
+    let message: String?
+}
+
 struct PreviewState: Equatable, Sendable {
     var isVisible = false
     var status: PreviewLoadStatus = .idle
@@ -78,6 +85,14 @@ struct PreviewState: Equatable, Sendable {
     var forwardToken = 0
     var reloadToken = 0
     var stopToken = 0
+
+    var attentionFailureEvidence: PreviewFailureEvidence? {
+        guard status == .failed else { return nil }
+        return PreviewFailureEvidence(
+            currentURL: currentURL?.absoluteString,
+            message: errorMessage
+        )
+    }
 
     mutating func open(_ url: URL) {
         self = PreviewState()
