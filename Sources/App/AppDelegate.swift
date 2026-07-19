@@ -1,4 +1,5 @@
 import AppKit
+import UserNotifications
 
 @MainActor
 enum AppModelRegistry {
@@ -6,13 +7,17 @@ enum AppModelRegistry {
 }
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     var appModel: AppModel?
     private var isTerminating = false
-    private weak var mainWindow: NSWindow?
+    // LocalWrap intentionally remains alive after its only main window closes.
+    // Retain that window for the app lifetime so menu-bar, Dock, notification,
+    // and failure-recovery actions can present the same window again.
+    private var mainWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         AppLog.lifecycle.info("Application finished launching")
+        UNUserNotificationCenter.current().delegate = self
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -22,9 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        guard !isTerminating, let mainWindow, !mainWindow.isVisible else { return }
-        AppLog.windowing.info("Restoring hidden main window after application activation")
-        mainWindow.makeKeyAndOrderFront(nil)
+        (appModel ?? AppModelRegistry.current)?.refreshAmbientServices()
     }
 
     func registerMainWindow(_ window: NSWindow) {
@@ -99,5 +102,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         return .terminateLater
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner]
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let identifier = response.notification.request.identifier
+        await MainActor.run { [weak self] in
+            guard let self else { return }
+            let model = appModel ?? AppModelRegistry.current
+            model?.handleNotificationResponse(identifier: identifier)
+            showMainWindow()
+        }
     }
 }

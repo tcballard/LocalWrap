@@ -83,6 +83,22 @@ exact redacted text before **Copy Report** is enabled. History can be cleared
 for one project or globally. See
 [Needs Attention and diagnostic privacy](Documentation/attention-and-recovery.md).
 
+## Menu-bar command center
+
+The menu-bar item is a compact, status-first controller for reviewed projects.
+Its contextual action is **Review Failure**, **Open Ready Apps**, or **Resume**;
+populated Attention, Running, Ready, and Ready to Start groups expose bounded
+project and saved-workspace shortcuts. **Show LocalWrap** remains available for
+the complete view. Opening the menu performs no repository diagnosis, and every
+action is revalidated against current Doctor, loopback URL, workspace, runtime,
+and verified-ownership policy before it runs.
+
+Settings keep **Launch LocalWrap at login**, per-project Autostart, ready
+destination, notifications, and background behavior separate. Runtime
+notifications are opt-in and limited to deduplicated Ready, Failed, and
+Unexpected Exit transitions. See the
+[menu-bar command center guide](Documentation/menu-bar-command-center.md).
+
 The next product milestones are documented in [ROADMAP.md](ROADMAP.md).
 
 ## Requirements

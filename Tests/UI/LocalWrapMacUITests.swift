@@ -255,15 +255,19 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(statusItem.waitForExistence(timeout: 3))
         statusItem.click()
 
-        XCTAssertTrue(statusItem.menuItems["Open Ready Projects"].isEnabled)
-        XCTAssertFalse(statusItem.menuItems["Resume Workspace"].isEnabled)
-        XCTAssertTrue(statusItem.menuItems["Start All Projects"].isEnabled)
-        XCTAssertTrue(statusItem.menuItems["Stop All Running Projects"].isEnabled)
-        XCTAssertTrue(statusItem.menuItems["Running Projects"].isEnabled)
+        XCTAssertTrue(statusItem.menuItems["Open Ready Apps"].waitForExistence(timeout: 3))
+        XCTAssertTrue(statusItem.menuItems["Open Ready Apps"].isEnabled)
+        XCTAssertTrue(statusItem.menuItems["Ready"].exists)
+        XCTAssertTrue(statusItem.menuItems["Workspace"].exists)
+        XCTAssertTrue(statusItem.menuItems["Settings…"].exists)
         XCTAssertTrue(statusItem.menuItems["Check for Updates…"].isEnabled)
-        XCTAssertTrue(statusItem.menuItems["About LocalWrapMac"].exists)
+        XCTAssertTrue(statusItem.menuItems["About LocalWrap"].exists)
 
-        statusItem.menuItems["Show LocalWrapMac"].click()
+        let showLocalWrap = app.menuItems["Show LocalWrap"]
+        XCTAssertTrue(showLocalWrap.exists)
+        showLocalWrap
+            .coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .click()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
     }
 

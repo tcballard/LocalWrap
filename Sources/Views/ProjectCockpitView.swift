@@ -254,7 +254,7 @@ struct ProjectCockpitView: View {
     }
 
     private func start() {
-        Task { try? await appModel.startProject(id: projectID) }
+        appModel.requestStartProject(id: projectID)
     }
 
     private func stop() {
@@ -262,7 +262,7 @@ struct ProjectCockpitView: View {
     }
 
     private func restart() {
-        Task { try? await appModel.restartProject(id: projectID) }
+        appModel.requestRestartProject(id: projectID)
     }
 
     private func togglePreview() {
