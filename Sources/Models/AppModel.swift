@@ -170,15 +170,26 @@ final class AppModel {
         if ProcessInfo.processInfo.arguments.contains("--ui-test-workspace-manifest-review") {
             let root = URL(fileURLWithPath: "/tmp", isDirectory: true)
             let packURL = root.appendingPathComponent(".localwrap/workspace.json")
-            let draft = ProjectDraft(
+            let webDraft = ProjectDraft(
                 id: "web",
                 name: "Web",
                 cwd: "/tmp/apps/web",
                 command: "npm run dev",
                 port: 5_173,
                 url: "http://localhost:5173",
+                autostart: true,
+                openOnReady: false,
                 dependsOn: ["api"],
                 healthCheck: HealthCheck(path: "/health")
+            )
+            let apiDraft = ProjectDraft(
+                id: "api",
+                name: "API",
+                cwd: "/tmp/services/api",
+                command: "node server.js",
+                port: 4_000,
+                url: "http://localhost:4000",
+                openOnReady: true
             )
             let pack = ReviewedWorkspacePack(
                 name: "Fixture Stack",
@@ -189,14 +200,20 @@ final class AppModel {
                         id: "web",
                         name: "Web",
                         path: "apps/web",
-                        draft: draft
+                        draft: webDraft
+                    ),
+                    ReviewedWorkspacePackProject(
+                        id: "api",
+                        name: "API",
+                        path: "services/api",
+                        draft: apiDraft
                     ),
                 ],
                 profiles: [
                     ReviewedWorkspacePackProfile(
                         id: "default",
                         name: "Full Stack",
-                        projectIDs: ["web"]
+                        projectIDs: ["web", "api"]
                     ),
                 ]
             )
@@ -213,30 +230,111 @@ final class AppModel {
                         command: "npm run dev",
                         port: 5_173,
                         url: "http://localhost:5173",
+                        autostart: true,
+                        openOnReady: false,
                         dependsOn: ["api"],
                         healthCheck: HealthCheck(path: "/health")
+                    ),
+                    WorkspacePackReviewProject(
+                        id: "api",
+                        name: "API",
+                        path: "services/api",
+                        command: "node server.js",
+                        port: 4_000,
+                        url: "http://localhost:4000",
+                        autostart: false,
+                        openOnReady: true,
+                        dependsOn: [],
+                        healthCheck: nil
                     ),
                 ],
                 profiles: [
                     WorkspacePackReviewProfile(
                         id: "default",
                         name: "Full Stack",
-                        projectIDs: ["web"]
+                        projectIDs: ["web", "api"]
                     ),
                 ],
-                issues: [],
+                issues: [
+                    WorkspacePackReviewIssue(
+                        code: "fixture-warning",
+                        severity: .warning,
+                        scope: "Project Web",
+                        field: "url",
+                        message: "Confirm the preview address before importing."
+                    ),
+                ],
                 changes: [
                     WorkspacePackChange(
                         entity: .project,
                         entityID: "web",
                         name: "Web",
-                        disposition: .add,
-                        existingSavedID: nil
+                        disposition: .update,
+                        existingSavedID: "saved-web"
+                    ),
+                    WorkspacePackChange(
+                        entity: .project,
+                        entityID: "api",
+                        name: "API",
+                        disposition: .unchanged,
+                        existingSavedID: "saved-api"
+                    ),
+                    WorkspacePackChange(
+                        entity: .workspace,
+                        entityID: "default",
+                        name: "Full Stack",
+                        disposition: .update,
+                        existingSavedID: "saved-workspace"
                     ),
                 ],
                 pack: pack
             )
-            return AppModel(repositoryOpenProposal: .workspace(review))
+            let savedProjects = [
+                Project(
+                    id: "saved-web",
+                    name: "Web",
+                    cwd: "/tmp/apps/web",
+                    command: "npm start",
+                    port: 5_173,
+                    url: "http://localhost:5173",
+                    autostart: false,
+                    openOnReady: true,
+                    createdAt: "2026-07-10T00:00:00Z",
+                    updatedAt: "2026-07-10T00:00:00Z",
+                    dependsOn: ["saved-api"]
+                ),
+                Project(
+                    id: "saved-api",
+                    name: "API",
+                    cwd: "/tmp/services/api",
+                    command: "node server.js",
+                    port: 4_000,
+                    url: "http://localhost:4000",
+                    openOnReady: true,
+                    createdAt: "2026-07-10T00:00:00Z",
+                    updatedAt: "2026-07-10T00:00:00Z"
+                ),
+            ]
+            let savedWorkspace = WorkspaceState(
+                lastRunningProjectIds: [],
+                savedWorkspaces: [
+                    WorkspaceProfile(
+                        id: "saved-workspace",
+                        name: "Frontend",
+                        projectIds: ["saved-web"],
+                        createdAt: "2026-07-10T00:00:00Z",
+                        updatedAt: "2026-07-10T00:00:00Z",
+                        lastStartedAt: nil,
+                        source: nil
+                    ),
+                ],
+                updatedAt: "2026-07-10T00:00:00Z"
+            )
+            return AppModel(
+                projects: savedProjects,
+                workspace: savedWorkspace,
+                repositoryOpenProposal: .workspace(review)
+            )
         }
         if ProcessInfo.processInfo.arguments.contains("--ui-test-repository-review") {
             let draft = ProjectDraft(
@@ -640,49 +738,14 @@ final class AppModel {
         }
     }
 
-    func reviewWorkspacePack(rootURL: URL) throws -> ReviewedWorkspacePack {
-        try workspacePacks.review(rootURL: rootURL)
-    }
-
-    func importWorkspacePack(_ pack: ReviewedWorkspacePack) {
-        guard let store else { return }
-        do {
-            _ = try workspacePacks.importReviewed(pack, into: store)
-            try reloadPersistence()
-            workspaceDiagnosis = try workspaceDoctor.diagnose(
-                projects: projects,
-                workspace: workspace,
-                target: selectedWorkspaceTarget,
-                runtimes: runtimes
-            )
-            errorMessage = nil
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     @discardableResult
     func importWorkspacePack(_ review: WorkspacePackReview) -> Bool {
-        guard review.canImport, review.pack != nil else {
-            errorMessage = review.blockers.first?.message
-                ?? "Workspace pack is not ready to import."
+        if let reason = workspacePackImportBlockReason(for: review) {
+            errorMessage = reason
             return false
         }
         guard let store else { return false }
         do {
-            let activeUpdates = review.changes.compactMap { change -> Project? in
-                guard change.entity == .project,
-                      change.disposition == .update,
-                      let projectID = change.existingSavedID,
-                      runtime(for: projectID).status.isActive else { return nil }
-                return project(id: projectID)
-            }
-            guard activeUpdates.isEmpty else {
-                let names = activeUpdates.map(\.name).sorted().joined(separator: ", ")
-                throw WorkspaceError.pack(
-                    "Stop these projects before importing running configuration changes: \(names)."
-                )
-            }
             _ = try workspacePacks.importReviewed(review, into: store)
             try reloadPersistence()
             selectedWorkspaceTarget = .allProjects
@@ -699,6 +762,50 @@ final class AppModel {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    func workspacePackImportBlockReason(for review: WorkspacePackReview) -> String? {
+        guard review.canImport, review.pack != nil else {
+            return review.blockers.first?.message
+                ?? "Workspace pack is not ready to import."
+        }
+        let activeUpdateIDs = workspacePackActiveUpdateProjectIDs(for: review)
+        guard activeUpdateIDs.isEmpty else {
+            let names = activeUpdateIDs
+                .map { project(id: $0)?.name ?? $0 }
+                .sorted()
+                .joined(separator: ", ")
+            return "Stop these projects before importing configuration changes: \(names)."
+        }
+        return nil
+    }
+
+    func workspacePackActiveUpdateProjectIDs(for review: WorkspacePackReview) -> [String] {
+        review.changes.compactMap { change in
+            guard change.entity == .project,
+                  change.disposition == .update,
+                  let projectID = change.existingSavedID,
+                  runtime(for: projectID).status.isActive else { return nil }
+            return projectID
+        }
+    }
+
+    func stopProjectsBlockingWorkspacePackImport(_ review: WorkspacePackReview) async {
+        for projectID in workspacePackActiveUpdateProjectIDs(for: review) {
+            await stopProject(id: projectID)
+        }
+    }
+
+    func revealWorkspaceManifest(_ review: WorkspacePackReview) {
+        desktopActions.revealFolder(review.packURL)
+    }
+
+    func copyWorkspaceManifestPath(_ review: WorkspacePackReview) {
+        desktopActions.copyText(review.packURL.path)
+    }
+
+    func reviewWorkspaceManifestAgain(_ review: WorkspacePackReview) {
+        reviewRepository(at: review.rootURL)
     }
 
     func exportWorkspacePack(rootURL: URL, overwrite: Bool) -> WorkspacePackExportResult? {

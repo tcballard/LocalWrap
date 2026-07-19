@@ -64,6 +64,7 @@ private struct WorkspacePackValidationFileSystem: WorkspacePackFileSystem {
 final class WorkspacePackService: @unchecked Sendable {
     static let version = 1
     static let candidates = [".localwrap/workspace.json", "localwrap.json"]
+    private static let maximumIdentifierLength = 128
 
     private let fileSystem: any WorkspacePackFileSystem
     private let commandParser: CommandParser
@@ -141,6 +142,15 @@ final class WorkspacePackService: @unchecked Sendable {
         }
 
         var issues = schemaIssues(in: rawData)
+        if decoded.name != nil, nonempty(decoded.name) == nil {
+            issues.append(issue(
+                "manifest-name-empty",
+                .blocker,
+                scope: "Manifest",
+                field: "name",
+                message: "Manifest name must contain a non-whitespace character when provided."
+            ))
+        }
         if decoded.localwrap != Self.version {
             issues.append(issue(
                 "unsupported-version",
@@ -165,6 +175,51 @@ final class WorkspacePackService: @unchecked Sendable {
         var candidates: [ManifestProjectCandidate] = []
 
         for (index, raw) in decoded.projects.enumerated() {
+            if raw.id != nil, nonempty(raw.id) == nil {
+                issues.append(issue(
+                    "project-id-empty",
+                    .blocker,
+                    scope: "Project #\(index + 1)",
+                    field: "id",
+                    message: "Project id must contain a non-whitespace character when provided."
+                ))
+            } else if let explicitID = nonempty(raw.id), explicitID.count > Self.maximumIdentifierLength {
+                issues.append(issue(
+                    "project-id-too-long",
+                    .blocker,
+                    scope: "Project #\(index + 1)",
+                    field: "id",
+                    message: "Project id must be 128 characters or fewer."
+                ))
+            }
+            if raw.name != nil, nonempty(raw.name) == nil {
+                issues.append(issue(
+                    "project-name-empty",
+                    .blocker,
+                    scope: "Project #\(index + 1)",
+                    field: "name",
+                    message: "Project name must contain a non-whitespace character when provided."
+                ))
+            }
+            if raw.path != nil, nonempty(raw.path) == nil {
+                issues.append(issue(
+                    "project-path-empty",
+                    .blocker,
+                    scope: "Project #\(index + 1)",
+                    field: "path",
+                    message: "Project path must contain a non-whitespace character when provided."
+                ))
+            }
+            if raw.url != nil, nonempty(raw.url) == nil {
+                issues.append(issue(
+                    "project-url-empty",
+                    .blocker,
+                    scope: "Project #\(index + 1)",
+                    field: "url",
+                    message: "Project URL must contain a non-whitespace character when provided."
+                ))
+            }
+
             let rawID = nonempty(raw.id) ?? nonempty(raw.name) ?? "project-\(index + 1)"
             let baseID = slug(rawID)
             if usedProjectIDs.contains(baseID) {
@@ -223,15 +278,17 @@ final class WorkspacePackService: @unchecked Sendable {
             }
 
             let command = raw.command.trimmingCharacters(in: .whitespacesAndNewlines)
+            var commandIsValid = true
             do {
                 _ = try commandParser.parse(command)
             } catch {
+                commandIsValid = false
                 issues.append(issue(
                     "command-invalid",
                     .blocker,
                     scope: scope,
                     field: "command",
-                    message: error.localizedDescription
+                    message: "Command must use a supported executable and contain only safe arguments."
                 ))
             }
 
@@ -246,8 +303,9 @@ final class WorkspacePackService: @unchecked Sendable {
                 ))
             }
 
-            let url = nonempty(raw.url) ?? "http://localhost:\(port)"
-            if !urlValidator.validate(url) {
+            let requestedURL = nonempty(raw.url) ?? "http://localhost:\(port)"
+            let reviewURL = removingURLUserInfo(from: requestedURL)
+            if !urlValidator.validate(requestedURL) {
                 issues.append(issue(
                     "url-invalid",
                     .blocker,
@@ -255,7 +313,7 @@ final class WorkspacePackService: @unchecked Sendable {
                     field: "url",
                     message: "URL must be local http(s) on localhost, 127.0.0.1, or ::1."
                 ))
-            } else if urlValidator.port(in: url) != port {
+            } else if urlValidator.port(in: requestedURL) != port {
                 issues.append(issue(
                     "url-port-mismatch",
                     .warning,
@@ -265,7 +323,7 @@ final class WorkspacePackService: @unchecked Sendable {
                 ))
             }
 
-            let health = healthChecks.resolve(projectURL: url, healthCheck: raw.healthCheck)
+            let health = healthChecks.resolve(projectURL: requestedURL, healthCheck: raw.healthCheck)
             if !health.isValid {
                 issues.append(issue(
                     "health-check-invalid",
@@ -280,13 +338,13 @@ final class WorkspacePackService: @unchecked Sendable {
                 id: id,
                 name: name,
                 cwd: projectURL.path,
-                command: command,
+                command: commandIsValid ? command : "[invalid command]",
                 port: port,
-                url: url,
+                url: reviewURL,
                 autostart: raw.autostart ?? false,
                 openOnReady: raw.openOnReady ?? true,
                 dependsOn: raw.dependsOn,
-                healthCheck: raw.healthCheck
+                healthCheck: removingURLUserInfo(from: raw.healthCheck)
             )
             candidates.append(ManifestProjectCandidate(
                 id: id,
@@ -301,14 +359,42 @@ final class WorkspacePackService: @unchecked Sendable {
         let projectIDs = Set(candidates.map(\.id))
         for index in candidates.indices {
             let scope = "Project \(candidates[index].name)"
+            let requestedDependencies = normalized(candidates[index].draft.dependsOn ?? [])
+            if requestedDependencies.contains(where: \.isEmpty) {
+                issues.append(issue(
+                    "dependency-reference-empty",
+                    .blocker,
+                    scope: scope,
+                    field: "dependsOn",
+                    message: "Dependency references must contain a non-whitespace character."
+                ))
+            }
+            if requestedDependencies.contains(where: { $0.count > Self.maximumIdentifierLength }) {
+                issues.append(issue(
+                    "dependency-reference-too-long",
+                    .blocker,
+                    scope: scope,
+                    field: "dependsOn",
+                    message: "Dependency references must be 128 characters or fewer."
+                ))
+            }
+            if containsDuplicates(requestedDependencies.filter { !$0.isEmpty }) {
+                issues.append(issue(
+                    "duplicate-dependency-reference",
+                    .blocker,
+                    scope: scope,
+                    field: "dependsOn",
+                    message: "Dependency references must be unique."
+                ))
+            }
             let dependencies = unique(candidates[index].draft.dependsOn ?? []).map { aliases[$0] ?? $0 }
-            for unknown in dependencies where !projectIDs.contains(unknown) {
+            if dependencies.contains(where: { !projectIDs.contains($0) }) {
                 issues.append(issue(
                     "dependency-unknown",
                     .blocker,
                     scope: scope,
                     field: "dependsOn",
-                    message: "Dependency does not match a project in this manifest: \(unknown)."
+                    message: "A dependency does not match a project in this manifest."
                 ))
             }
             let knownDependencies = dependencies.filter(projectIDs.contains)
@@ -316,7 +402,8 @@ final class WorkspacePackService: @unchecked Sendable {
         }
 
         let portGroups = Dictionary(grouping: candidates, by: { $0.draft.port })
-        for (port, matches) in portGroups where matches.count > 1 {
+        for port in portGroups.keys.sorted() {
+            guard let matches = portGroups[port], matches.count > 1 else { continue }
             issues.append(issue(
                 "port-conflict",
                 .blocker,
@@ -339,6 +426,32 @@ final class WorkspacePackService: @unchecked Sendable {
         var usedProfileIDs = Set<String>()
         var profiles: [ReviewedWorkspacePackProfile] = []
         for (index, raw) in (decoded.workspaces ?? []).enumerated() {
+            if raw.id != nil, nonempty(raw.id) == nil {
+                issues.append(issue(
+                    "workspace-id-empty",
+                    .blocker,
+                    scope: "Workspace #\(index + 1)",
+                    field: "id",
+                    message: "Workspace id must contain a non-whitespace character when provided."
+                ))
+            } else if let explicitID = nonempty(raw.id), explicitID.count > Self.maximumIdentifierLength {
+                issues.append(issue(
+                    "workspace-id-too-long",
+                    .blocker,
+                    scope: "Workspace #\(index + 1)",
+                    field: "id",
+                    message: "Workspace id must be 128 characters or fewer."
+                ))
+            }
+            if raw.name != nil, nonempty(raw.name) == nil {
+                issues.append(issue(
+                    "workspace-name-empty",
+                    .blocker,
+                    scope: "Workspace #\(index + 1)",
+                    field: "name",
+                    message: "Workspace name must contain a non-whitespace character when provided."
+                ))
+            }
             let rawID = nonempty(raw.id) ?? nonempty(raw.name) ?? "workspace-\(index + 1)"
             let baseID = slug(rawID)
             let name = nonempty(raw.name) ?? rawID
@@ -353,15 +466,43 @@ final class WorkspacePackService: @unchecked Sendable {
                 ))
             }
             let id = uniqueSlug(rawID, used: &usedProfileIDs)
+            let requestedReferences = normalized(raw.projects ?? [])
+            if requestedReferences.contains(where: \.isEmpty) {
+                issues.append(issue(
+                    "workspace-project-reference-empty",
+                    .blocker,
+                    scope: scope,
+                    field: "projects",
+                    message: "Workspace project references must contain a non-whitespace character."
+                ))
+            }
+            if requestedReferences.contains(where: { $0.count > Self.maximumIdentifierLength }) {
+                issues.append(issue(
+                    "workspace-project-reference-too-long",
+                    .blocker,
+                    scope: scope,
+                    field: "projects",
+                    message: "Workspace project references must be 128 characters or fewer."
+                ))
+            }
+            if containsDuplicates(requestedReferences.filter { !$0.isEmpty }) {
+                issues.append(issue(
+                    "duplicate-workspace-project-reference",
+                    .blocker,
+                    scope: scope,
+                    field: "projects",
+                    message: "Workspace project references must be unique."
+                ))
+            }
             let requested = unique(raw.projects ?? [])
             let resolved = requested.map { aliases[$0] ?? $0 }
-            for unknown in resolved where !projectIDs.contains(unknown) {
+            if resolved.contains(where: { !projectIDs.contains($0) }) {
                 issues.append(issue(
                     "workspace-project-unknown",
                     .blocker,
                     scope: scope,
                     field: "projects",
-                    message: "Workspace references an unknown project: \(unknown)."
+                    message: "Workspace references an unknown project."
                 ))
             }
             let validIDs = resolved.filter(projectIDs.contains)
@@ -428,6 +569,8 @@ final class WorkspacePackService: @unchecked Sendable {
                     command: $0.draft.command,
                     port: $0.draft.port,
                     url: $0.draft.url,
+                    autostart: $0.draft.autostart,
+                    openOnReady: $0.draft.openOnReady,
                     dependsOn: $0.draft.dependsOn ?? [],
                     healthCheck: $0.draft.healthCheck
                 )
@@ -435,14 +578,10 @@ final class WorkspacePackService: @unchecked Sendable {
             profiles: profiles.map {
                 WorkspacePackReviewProfile(id: $0.id, name: $0.name, projectIDs: $0.projectIDs)
             },
-            issues: issues,
-            changes: changePlan.changes,
+            issues: sortedIssues(issues),
+            changes: sortedChanges(changePlan.changes),
             pack: reviewedPack
         )
-    }
-
-    func importReviewed(_ pack: ReviewedWorkspacePack, into store: ProjectStore) throws -> NativeStoreDocument {
-        try store.importWorkspacePack(pack)
     }
 
     func importReviewed(_ review: WorkspacePackReview, into store: ProjectStore) throws -> NativeStoreDocument {
@@ -572,6 +711,9 @@ final class WorkspacePackService: @unchecked Sendable {
         let root = canonical(rootURL)
         let directory = root.appendingPathComponent(".localwrap", isDirectory: true)
         let destination = directory.appendingPathComponent("workspace.json")
+        guard contains(root: root, child: directory), contains(root: root, child: destination) else {
+            throw WorkspaceError.pack("Workspace export destination must remain inside the selected folder.")
+        }
         if fileSystem.fileExists(at: destination), !overwrite {
             throw WorkspaceError.pack("Workspace pack already exists. Confirm overwrite to replace it.")
         }
@@ -818,7 +960,8 @@ final class WorkspacePackService: @unchecked Sendable {
             }
         }
 
-        for (directory, importedAtDirectory) in unmatchedByDirectory {
+        for directory in unmatchedByDirectory.keys.sorted() {
+            guard let importedAtDirectory = unmatchedByDirectory[directory] else { continue }
             let savedAtDirectory = savedProjects.filter {
                 !claimedSavedIDs.contains($0.id)
                     && canonical(URL(fileURLWithPath: $0.cwd)).path == directory
@@ -968,6 +1111,65 @@ final class WorkspacePackService: @unchecked Sendable {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    private func normalized(_ values: [String]) -> [String] {
+        values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    private func containsDuplicates(_ values: [String]) -> Bool {
+        var seen = Set<String>()
+        return values.contains { !seen.insert($0).inserted }
+    }
+
+    private func removingURLUserInfo(from value: String) -> String {
+        guard var components = URLComponents(string: value),
+              components.user != nil || components.password != nil else {
+            return value
+        }
+        components.user = nil
+        components.password = nil
+        return components.string ?? "[redacted URL]"
+    }
+
+    private func removingURLUserInfo(from healthCheck: HealthCheck?) -> HealthCheck? {
+        guard var healthCheck else { return nil }
+        if let url = healthCheck.url {
+            healthCheck.url = removingURLUserInfo(from: url)
+        }
+        return healthCheck
+    }
+
+    private func sortedIssues(_ issues: [WorkspacePackReviewIssue]) -> [WorkspacePackReviewIssue] {
+        issues.sorted {
+            issueSortKey($0).lexicographicallyPrecedes(issueSortKey($1))
+        }
+    }
+
+    private func issueSortKey(_ issue: WorkspacePackReviewIssue) -> [String] {
+        [
+            issue.severity == .blocker ? "0" : "1",
+            issue.scope,
+            issue.field ?? "",
+            issue.code,
+            issue.message,
+        ]
+    }
+
+    private func sortedChanges(_ changes: [WorkspacePackChange]) -> [WorkspacePackChange] {
+        changes.sorted {
+            changeSortKey($0).lexicographicallyPrecedes(changeSortKey($1))
+        }
+    }
+
+    private func changeSortKey(_ change: WorkspacePackChange) -> [String] {
+        [
+            change.entity == .project ? "0" : "1",
+            change.entityID,
+            change.name,
+            change.disposition.rawValue,
+            change.existingSavedID ?? "",
+        ]
+    }
+
     private func slug(_ value: String) -> String {
         let components = value.lowercased().unicodeScalars.map { scalar -> Character in
             CharacterSet.alphanumerics.contains(scalar) ? Character(String(scalar)) : "-"
@@ -994,7 +1196,7 @@ final class WorkspacePackService: @unchecked Sendable {
 
     private func unique(_ values: [String]) -> [String] {
         var seen = Set<String>()
-        return values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return normalized(values)
             .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 }

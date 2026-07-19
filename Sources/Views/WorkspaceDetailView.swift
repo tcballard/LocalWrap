@@ -9,6 +9,8 @@ struct WorkspaceDetailView: View {
     @State private var exporting = false
     @State private var exportRoot: URL?
     @State private var confirmOverwrite = false
+    @State private var exportResult: WorkspacePackExportResult?
+    @State private var exportDestination: URL?
     @State private var editingProfile = false
     @State private var profileName = ""
     @State private var profileProjectIDs = Set<String>()
@@ -69,6 +71,9 @@ struct WorkspaceDetailView: View {
                     ProgressView("Running workspace operation…")
                         .accessibilityIdentifier("workspaceOperationProgress")
                 }
+                if let exportResult, let exportDestination {
+                    exportSummary(exportResult, destination: exportDestination)
+                }
                 if let diagnosis = appModel.workspaceDiagnosis {
                     HStack(spacing: 18) {
                         metric("Projects", diagnosis.totals.projects)
@@ -107,13 +112,13 @@ struct WorkspaceDetailView: View {
                 if FileManager.default.fileExists(atPath: root.appendingPathComponent(".localwrap/workspace.json").path) {
                     confirmOverwrite = true
                 } else {
-                    _ = appModel.exportWorkspacePack(rootURL: root, overwrite: false)
+                    performExport(to: root, overwrite: false)
                 }
             } catch { appModel.errorMessage = error.localizedDescription }
         }
         .confirmationDialog("Replace existing workspace pack?", isPresented: $confirmOverwrite) {
             Button("Replace", role: .destructive) {
-                if let exportRoot { _ = appModel.exportWorkspacePack(rootURL: exportRoot, overwrite: true) }
+                if let exportRoot { performExport(to: exportRoot, overwrite: true) }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -128,6 +133,75 @@ struct WorkspaceDetailView: View {
 
     private func run(_ target: WorkspaceTarget, readyOnly: Bool) {
         Task { await appModel.startWorkspace(target: target, readyOnly: readyOnly) }
+    }
+
+    private func performExport(to root: URL, overwrite: Bool) {
+        exportResult = appModel.exportWorkspacePack(rootURL: root, overwrite: overwrite)
+        exportDestination = exportResult == nil ? nil : root
+    }
+
+    private func exportSummary(
+        _ result: WorkspacePackExportResult,
+        destination: URL
+    ) -> some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Label(
+                        result.skippedProjects.isEmpty
+                            ? "Workspace manifest exported"
+                            : "Workspace manifest exported with skipped projects",
+                        systemImage: result.skippedProjects.isEmpty
+                            ? "checkmark.circle.fill"
+                            : "exclamationmark.triangle.fill"
+                    )
+                    .font(.headline)
+                    .foregroundStyle(result.skippedProjects.isEmpty ? Color.green : Color.orange)
+                    Spacer()
+                    Button("Dismiss", systemImage: "xmark") {
+                        exportResult = nil
+                        exportDestination = nil
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.plain)
+                    .help("Dismiss export summary")
+                    .accessibilityIdentifier("dismissWorkspaceExportSummary")
+                }
+
+                Text("Saved \(result.pack.projects.count) project\(result.pack.projects.count == 1 ? "" : "s") to \(destination.appendingPathComponent(".localwrap/workspace.json").path).")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+
+                if !result.skippedProjects.isEmpty {
+                    Text("These saved projects were outside the selected folder and were not included:")
+                        .font(.callout.weight(.medium))
+                    ForEach(result.skippedProjects) { project in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Image(systemName: "minus.circle")
+                                .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
+                            Text(project.name)
+                            Text(skippedProjectReason(project.reason))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .font(.callout)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("workspaceExportSkipped-\(project.id)")
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .accessibilityIdentifier("workspaceExportSummary")
+    }
+
+    private func skippedProjectReason(_ reason: String) -> String {
+        switch reason {
+        case "outside-workspace-folder": "is outside this folder"
+        default: reason.replacingOccurrences(of: "-", with: " ")
+        }
     }
 
     private func metric(_ label: String, _ value: Int) -> some View {
