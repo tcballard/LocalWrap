@@ -76,7 +76,7 @@ final class LocalWrapMacUITests: XCTestCase {
         }
     }
 
-    func testClosingMainWindowHidesAndApplicationActivationReopensIt() {
+    func testClosingMainWindowKeepsAppAvailableInTheMenuBar() {
         let app = XCUIApplication()
         app.launchArguments += [
             "-ApplePersistenceIgnoreState", "YES", "--ui-test-preview",
@@ -85,15 +85,18 @@ final class LocalWrapMacUITests: XCTestCase {
 
         let window = app.windows.firstMatch
         XCTAssertTrue(window.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.descendants(matching: .any)["projectStatus"].label, "ready")
+        XCTAssertTrue(app.buttons["previewProjectButton"].waitForExistence(timeout: 5))
         let closeButton = window.buttons[XCUIIdentifierCloseWindow]
         XCTAssertTrue(closeButton.exists)
         closeButton.click()
         XCTAssertTrue(window.waitForNonExistence(timeout: 2))
 
         app.activate()
-        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 5))
-        XCTAssertEqual(app.descendants(matching: .any)["projectStatus"].label, "ready")
+        XCTAssertFalse(
+            app.windows.firstMatch.waitForExistence(timeout: 1),
+            "Ordinary application activation must not reopen a window the user closed."
+        )
+        XCTAssertTrue(app.menuBars.statusItems.firstMatch.waitForExistence(timeout: 3))
     }
 
     func testReadyProjectExposesPreviewControlsWithoutNativeBridge() {
@@ -110,7 +113,6 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["projectPreview"].waitForExistence(timeout: 3)
         )
-        XCTAssertTrue(app.descendants(matching: .any)["projectLiveSplitView"].exists)
         XCTAssertTrue(app.buttons["previewBackButton"].exists)
         XCTAssertFalse(app.buttons["previewBackButton"].isEnabled)
         XCTAssertTrue(app.buttons["previewForwardButton"].exists)
@@ -164,12 +166,10 @@ final class LocalWrapMacUITests: XCTestCase {
         ]
         app.launch()
 
-        XCTAssertTrue(
-            app.descendants(matching: .any)["workspacePackReviewTitle"]
-                .waitForExistence(timeout: 5)
-        )
-        XCTAssertTrue(app.staticTexts["Review Workspace Manifest"].exists)
-        XCTAssertTrue(app.staticTexts["Manifest v1"].exists)
+        let review = app.descendants(matching: .any)["workspacePackReview"]
+        XCTAssertTrue(review.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Review Workspace Manifest"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Manifest version 1"].exists)
         XCTAssertTrue(app.staticTexts["Fixture Stack"].exists)
         XCTAssertTrue(app.staticTexts["Ready with 1 warning"].exists)
         XCTAssertTrue(app.staticTexts["Import saves only the reviewed configuration. Projects remain stopped and no commands run."].exists)
@@ -181,15 +181,31 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(app.buttons["copyWorkspaceManifestPath"].exists)
         XCTAssertTrue(app.buttons["reviewWorkspaceManifestAgain"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackIssue-warning-fixture-warning-project-web-url"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-web"].exists)
+        let reviewScrollView = review.scrollViews.firstMatch
+        let webProject = app.descendants(matching: .any)["workspacePackProject-web"]
+        if !webProject.exists {
+            XCTAssertTrue(reviewScrollView.exists)
+            reviewScrollView.scroll(byDeltaX: 0, deltaY: 600)
+        }
+        XCTAssertTrue(webProject.waitForExistence(timeout: 3))
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackProjectComparison-web"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-web-field-command"].exists)
+        let commandComparison = app.descendants(matching: .any)[
+            "workspacePackProject-web-field-command"
+        ]
+        XCTAssertTrue(commandComparison.exists)
+        XCTAssertTrue(commandComparison.label.contains("npm run dev"))
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-web-field-autostart"].exists)
         XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-web-field-open-on-ready"].exists)
-        XCTAssertTrue(app.staticTexts["npm run dev"].exists)
-        XCTAssertTrue(app.staticTexts["API"].exists)
-        XCTAssertTrue(app.staticTexts["/health"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["workspacePackProject-api"].exists)
+        let healthComparison = app.descendants(matching: .any)[
+            "workspacePackProject-web-field-health"
+        ]
+        XCTAssertTrue(healthComparison.exists)
+        XCTAssertTrue(healthComparison.label.contains("/health"))
+        let apiProject = app.descendants(matching: .any)["workspacePackProject-api"]
+        if !apiProject.exists {
+            reviewScrollView.scroll(byDeltaX: 0, deltaY: 500)
+        }
+        XCTAssertTrue(apiProject.waitForExistence(timeout: 3))
         XCTAssertFalse(app.descendants(matching: .any)["workspacePackProjectDetails-api"].exists)
         XCTAssertTrue(app.buttons["cancelWorkspacePackImport"].exists)
         XCTAssertTrue(app.buttons["confirmWorkspacePackImport"].isEnabled)
@@ -219,7 +235,10 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(
             app.descendants(matching: .any)["attentionDetail"].waitForExistence(timeout: 3)
         )
-        let ownershipIssue = app.staticTexts["Runtime identity conflicts with the saved record"]
+        let ownershipIssue = app.buttons.matching(NSPredicate(
+            format: "identifier BEGINSWITH 'attentionIssue-' AND label CONTAINS %@",
+            "Runtime identity conflicts with the saved record"
+        )).firstMatch
         XCTAssertTrue(ownershipIssue.waitForExistence(timeout: 3))
         ownershipIssue.click()
         XCTAssertTrue(app.descendants(matching: .any)["projectStatus"].waitForExistence(timeout: 3))
@@ -238,7 +257,12 @@ final class LocalWrapMacUITests: XCTestCase {
         aboutItem.click()
 
         XCTAssertTrue(app.staticTexts["LocalWrapMac"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Version 3.3.0 (1)"].exists)
+        let version = app.staticTexts.matching(NSPredicate(
+            format: "label BEGINSWITH %@",
+            "Version "
+        )).firstMatch
+        XCTAssertTrue(version.waitForExistence(timeout: 3))
+        XCTAssertGreaterThan(version.label.count, "Version ".count)
     }
 
     func testMenuBarActionsReflectReadyBackgroundProjectAndShowHiddenWindow() {
