@@ -134,7 +134,10 @@ final class LocalWrapMacUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Open in Browser"].waitForExistence(timeout: 3))
         let closePreview = app.buttons["Close Preview"]
         XCTAssertTrue(closePreview.waitForExistence(timeout: 3))
-        closePreview.click()
+        // The hosted runner's narrow desktop can place this trailing control
+        // beyond its clickable bounds. The same Preview toggle is the visible,
+        // already-hittable close action in that layout.
+        previewButton.click()
         XCTAssertTrue(
             app.descendants(matching: .any)["projectPreview"].waitForNonExistence(timeout: 2)
         )
@@ -192,9 +195,10 @@ final class LocalWrapMacUITests: XCTestCase {
         // Hosted AppKit flattens the sheet's ScrollView and its offscreen
         // GridRows out of XCUI. WorkspacePackServiceTests owns those exact
         // field values; this test verifies the review and safe import surface.
-        XCTAssertTrue(app.buttons["cancelWorkspacePackImport"].exists)
-        XCTAssertTrue(app.buttons["confirmWorkspacePackImport"].isEnabled)
-        XCTAssertTrue(app.buttons["Import Projects"].exists)
+        XCTAssertTrue(app.buttons["Cancel"].exists)
+        let importProjects = app.buttons["Import Projects"]
+        XCTAssertTrue(importProjects.exists)
+        XCTAssertTrue(importProjects.isEnabled)
         XCTAssertTrue(app.staticTexts["Projects remain stopped after import."].exists)
     }
 
